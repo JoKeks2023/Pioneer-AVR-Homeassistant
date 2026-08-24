@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.components.ssdp import SsdpServiceInfo
 from homeassistant.const import CONF_HOST, CONF_PORT
-from homeassistant.data_entry_flow import FlowResult
+
+if TYPE_CHECKING:
+    from homeassistant.helpers.service_info.ssdp import SsdpServiceInfo
 
 from .client import (
     PioneerAVRClient,
@@ -47,7 +48,7 @@ class PioneerAVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> config_entries.ConfigFlowResult:
         """Handle manual setup."""
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -85,7 +86,7 @@ class PioneerAVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_ssdp(
         self, discovery_info: SsdpServiceInfo
-    ) -> FlowResult:
+    ) -> config_entries.ConfigFlowResult:
         """Handle a precisely matched VSX-827 SSDP discovery."""
         host = urlsplit(discovery_info.ssdp_location).hostname
         if host is None:
@@ -121,7 +122,7 @@ class PioneerAVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_ssdp_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> config_entries.ConfigFlowResult:
         """Confirm a discovered receiver."""
         if self._discovered_host is None:
             return self.async_abort(reason="invalid_discovery")
@@ -154,7 +155,7 @@ class PioneerAVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> config_entries.ConfigFlowResult:
         """Update receiver connection settings."""
         entry = self._get_reconfigure_entry()
         errors: dict[str, str] = {}
@@ -212,7 +213,7 @@ class PioneerAVROptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> config_entries.ConfigFlowResult:
         """Explain that connection changes use reconfigure."""
         if user_input is not None:
             return self.async_create_entry(title="", data={})
