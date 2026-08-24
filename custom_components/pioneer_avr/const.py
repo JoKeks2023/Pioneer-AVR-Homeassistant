@@ -5,6 +5,10 @@ from __future__ import annotations
 DOMAIN = "pioneer_avr"
 
 CONF_PORT = "port"
+CONF_ASSUME_OFF_WHEN_UNAVAILABLE = "assume_off_when_unavailable"
+CONF_CALIBRATE_VOLUME = "calibrate_volume"
+CONF_VOLUME_MAX_RAW = "volume_max_raw"
+CONF_VOLUME_MIN_RAW = "volume_min_raw"
 
 DEFAULT_NAME = "Pioneer VSX-827"
 DEFAULT_PORT = 8102
@@ -16,6 +20,8 @@ MODEL = "VSX-827"
 
 VOLUME_MIN = 0
 VOLUME_MAX = 161
+
+DEFAULT_ASSUME_OFF_WHEN_UNAVAILABLE = True
 
 # Source codes documented for the VSX-1022/VSX-822 2012 protocol family and
 # observed by existing VSX-827 users. A receiver may report only a subset.

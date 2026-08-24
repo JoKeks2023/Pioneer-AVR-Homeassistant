@@ -16,17 +16,33 @@ from .client import (
     PioneerAVRClient,
     PioneerAVRConnectionError,
     PioneerAVRProtocolError,
+    ReceiverState,
 )
-from .const import DEFAULT_NAME, DEFAULT_PORT, DEFAULT_TIMEOUT, DOMAIN
+from .const import (
+    CONF_ASSUME_OFF_WHEN_UNAVAILABLE,
+    CONF_CALIBRATE_VOLUME,
+    CONF_VOLUME_MAX_RAW,
+    CONF_VOLUME_MIN_RAW,
+    DEFAULT_ASSUME_OFF_WHEN_UNAVAILABLE,
+    DEFAULT_NAME,
+    DEFAULT_PORT,
+    DEFAULT_TIMEOUT,
+    DOMAIN,
+)
+
+
+async def _async_query_state(host: str, port: int) -> ReceiverState:
+    """Query an endpoint and close the validation connection."""
+    client = PioneerAVRClient(host, port, DEFAULT_TIMEOUT)
+    try:
+        return await client.query_state()
+    finally:
+        await client.disconnect()
 
 
 async def _async_validate(host: str, port: int) -> None:
-    """Validate an endpoint and close the validation connection."""
-    client = PioneerAVRClient(host, port, DEFAULT_TIMEOUT)
-    try:
-        await client.query_state()
-    finally:
-        await client.disconnect()
+    """Validate an endpoint using the normal runtime protocol."""
+    await _async_query_state(host, port)
 
 
 class PioneerAVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -209,12 +225,109 @@ class PioneerAVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class PioneerAVROptionsFlow(config_entries.OptionsFlow):
-    """Placeholder options flow for future model-specific capabilities."""
+    """Configure offline behavior and calibrated volume endpoints."""
+
+    def __init__(self) -> None:
+        self._pending_options: dict[str, Any] = {}
+        self._calibration_min_raw: int | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Explain that connection changes use reconfigure."""
+        """Configure receiver behavior or start volume calibration."""
         if user_input is not None:
-            return self.async_create_entry(title="", data={})
-        return self.async_show_form(step_id="init", data_schema=vol.Schema({}))
+            self._pending_options = dict(self.config_entry.options)
+            self._pending_options[CONF_ASSUME_OFF_WHEN_UNAVAILABLE] = user_input[
+                CONF_ASSUME_OFF_WHEN_UNAVAILABLE
+            ]
+            if user_input[CONF_CALIBRATE_VOLUME]:
+                return await self.async_step_calibration_min()
+            return self.async_create_entry(title="", data=self._pending_options)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_ASSUME_OFF_WHEN_UNAVAILABLE,
+                        default=self.config_entry.options.get(
+                            CONF_ASSUME_OFF_WHEN_UNAVAILABLE,
+                            DEFAULT_ASSUME_OFF_WHEN_UNAVAILABLE,
+                        ),
+                    ): bool,
+                    vol.Required(CONF_CALIBRATE_VOLUME, default=False): bool,
+                }
+            ),
+        )
+
+    async def async_step_calibration_min(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Capture the quiet endpoint selected on the receiver."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            state, error = await self._async_read_calibration_state()
+            if error is not None:
+                errors["base"] = error
+            elif state.volume_raw is None:
+                errors["base"] = "volume_not_reported"
+            else:
+                self._calibration_min_raw = state.volume_raw
+                return await self.async_step_calibration_max()
+        return self.async_show_form(
+            step_id="calibration_min",
+            data_schema=vol.Schema({}),
+            errors=errors,
+        )
+
+    async def async_step_calibration_max(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Capture the loud endpoint selected on the receiver."""
+        assert self._calibration_min_raw is not None
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            state, error = await self._async_read_calibration_state()
+            if error is not None:
+                errors["base"] = error
+            elif state.volume_raw is None:
+                errors["base"] = "volume_not_reported"
+            elif state.volume_raw <= self._calibration_min_raw:
+                errors["base"] = "invalid_volume_range"
+            else:
+                self._pending_options[CONF_VOLUME_MIN_RAW] = (
+                    self._calibration_min_raw
+                )
+                self._pending_options[CONF_VOLUME_MAX_RAW] = state.volume_raw
+                return self.async_create_entry(
+                    title="", data=self._pending_options
+                )
+        return self.async_show_form(
+            step_id="calibration_max",
+            data_schema=vol.Schema({}),
+            errors=errors,
+            description_placeholders={
+                "minimum": str(self._calibration_min_raw)
+            },
+        )
+
+    async def _async_read_calibration_state(
+        self,
+    ) -> tuple[ReceiverState | None, str | None]:
+        """Read the current receiver state for a calibration step."""
+        try:
+            runtime = getattr(self.config_entry, "runtime_data", None)
+            if runtime is not None:
+                state = await runtime.client.query_state()
+            else:
+                state = await _async_query_state(
+                    self.config_entry.data[CONF_HOST],
+                    self.config_entry.data.get(CONF_PORT, DEFAULT_PORT),
+                )
+        except PioneerAVRConnectionError:
+            return None, "cannot_connect"
+        except PioneerAVRProtocolError:
+            return None, "invalid_receiver"
+        except Exception:  # noqa: BLE001
+            return None, "unknown"
+        return state, None

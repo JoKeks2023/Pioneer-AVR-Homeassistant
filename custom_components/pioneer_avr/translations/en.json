@@ -37,8 +37,27 @@
     "step": {
       "init": {
         "title": "Pioneer AVR options",
-        "description": "Use Reconfigure to change the receiver address. No model-specific options are currently available."
+        "description": "Choose how an unreachable powered-off receiver is represented, or start a safe two-point volume calibration.",
+        "data": {
+          "assume_off_when_unavailable": "Show as off when unreachable after power-off",
+          "calibrate_volume": "Start volume calibration"
+        }
+      },
+      "calibration_min": {
+        "title": "Set the quiet volume endpoint",
+        "description": "Use the receiver's physical volume control to select the quietest level you want the Home Assistant slider to use, then select Submit. The integration only reads the current volume and will not change it."
+      },
+      "calibration_max": {
+        "title": "Set the loud volume endpoint",
+        "description": "The quiet endpoint was recorded as raw value {minimum}. Now select the loudest safe level using the receiver's physical control, then select Submit. The integration only reads the current volume."
       }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the receiver.",
+      "invalid_receiver": "The device did not answer with the Pioneer AVR protocol.",
+      "invalid_volume_range": "The loud endpoint must be higher than the quiet endpoint.",
+      "unknown": "Unexpected error. Check the Home Assistant logs.",
+      "volume_not_reported": "The receiver did not report its current volume."
     }
   }
 }

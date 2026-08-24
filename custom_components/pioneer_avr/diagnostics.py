@@ -19,7 +19,12 @@ async def async_get_config_entry_diagnostics(
     return {
         "entry": async_redact_data(dict(entry.data), {CONF_HOST}),
         "connected": runtime.client.connected,
+        "assumed_off": runtime.coordinator.assumed_off,
+        "assume_off_when_unavailable": (
+            runtime.coordinator.assume_off_when_unavailable
+        ),
         "volume_control_mode": runtime.client.volume_control_mode,
+        "volume_range_raw": runtime.client.volume_range_raw,
         "last_update_success": runtime.coordinator.last_update_success,
         "last_error": runtime.coordinator.last_error,
         "state": {

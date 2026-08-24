@@ -72,7 +72,17 @@ class PioneerAVRMediaPlayer(
     @property
     def volume_level(self) -> float | None:
         """Return normalized receiver volume."""
-        return self.coordinator.data.volume_level
+        return self.coordinator.client.volume_level
+
+    @property
+    def available(self) -> bool:
+        """Keep a powered-off receiver available when configured to do so."""
+        return self.coordinator.receiver_available
+
+    @property
+    def assumed_state(self) -> bool:
+        """Indicate when off is inferred from network disappearance."""
+        return self.coordinator.assumed_off
 
     @property
     def is_volume_muted(self) -> bool | None:
@@ -105,7 +115,7 @@ class PioneerAVRMediaPlayer(
 
     async def async_turn_off(self) -> None:
         await self.coordinator.client.set_power(False)
-        await self.coordinator.async_request_refresh()
+        self.coordinator.async_assume_power_off()
 
     async def async_volume_up(self) -> None:
         await self.coordinator.client.volume_up()

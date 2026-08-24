@@ -26,8 +26,10 @@ automatic SSDP discovery, a UI config flow, immediate TCP state updates, and a
 30-second fallback refresh.
 
 > [!IMPORTANT]
-> Enable **Network Standby** in the receiver's Network Setup menu. Without it,
-> the Ethernet interface may become unreachable when the receiver is off.
+> **Network Standby** is recommended for network power-on. If the receiver
+> deliberately drops off the network when switched off, the integration can
+> keep its entity available with the correct `off` state instead of showing
+> `unavailable`.
 
 ## At a glance
 
@@ -46,17 +48,17 @@ automatic SSDP discovery, a UI config flow, immediate TCP state updates, and a
 
 | Capability | Support | Notes |
 | --- | :---: | --- |
-| Power on and off | ✅ | Network Standby is required for power-on |
+| Power on and off | ✅ | Powered-off receivers can remain represented as `off` |
 | Volume display | ✅ | Normalized to Home Assistant's `0.0–1.0` range |
 | Volume up and down | ✅ | Native `VU` / `VD` commands |
-| Volume slider | ✅ | Safely emulated with individually confirmed steps |
+| Volume slider | ✅ | Confirmed steps with optional two-point calibration |
 | Mute and unmute | ✅ | State is queried and confirmed |
 | Current input | ✅ | Receiver-reported source |
 | Input selection | ✅ | Confirmed Pioneer source codes |
 | Listening-mode groups | ✅ | Auto/Direct, Standard/ALC, Advanced Surround |
 | Current listening-mode name | ⚠️ | VSX-827 returns only a generic acknowledgement |
 | Automatic discovery | ✅ | Precise model/manufacturer SSDP match |
-| Reconfiguration and diagnostics | ✅ | Host is redacted from diagnostics |
+| Options, reconfiguration and diagnostics | ✅ | Host is redacted from diagnostics |
 | Speaker B as Zone 2 | — | Not an independent VSX-827 zone |
 | Media playback controls | — | Not part of the receiver control protocol |
 
@@ -99,9 +101,13 @@ restart Home Assistant.
 
 ## Receiver setup
 
-1. Connect the VSX-827 by Ethernet to the same local network as Home Assistant.
+1. Connect the VSX-827 by Ethernet to a network reachable from Home Assistant.
+   The receiver and Home Assistant do not have to share a subnet; routed TCP
+   connectivity to port `8102` is sufficient for manual configuration.
 2. Create a stable DHCP reservation for the receiver.
-3. Enable **Network Standby** in the receiver's Network Setup menu.
+3. Enable **Network Standby** if network power-on is required. Some receivers
+   still disable their network interface when off; the integration can retain
+   a correct `off` state in that case.
 4. Close Pioneer ControlApp during setup; the receiver supports only a small
    number of simultaneous control connections.
 5. In Home Assistant, open **Settings → Devices & services**. Accept the
@@ -114,6 +120,42 @@ restart Home Assistant.
 
 The setup flow opens a local TCP connection and requires a valid Pioneer power
 response before it creates the config entry. YAML configuration is not used.
+
+## Receiver options and volume calibration
+
+Open **Settings → Devices & services → Pioneer AVR → Configure**.
+
+### Preserve the powered-off state
+
+Keep **Show as off when unreachable after power-off** enabled if the VSX-827
+shuts down its network interface. After Home Assistant successfully sends the
+power-off command, the entity remains available as `off`. A receiver that
+disappears while its last known state was `on` is still marked unavailable, so
+ordinary network failures are not hidden.
+
+If Home Assistant restarts while the configured receiver is unreachable, this
+option also allows the existing entity to load as an assumed `off` receiver.
+Disable the option if every unreachable state should instead be treated as a
+setup failure.
+
+### Safe two-point volume calibration
+
+Pioneer reports volume in raw half-steps, while Home Assistant requires a
+normalized `0–100 %` slider. Calibration maps the slider to the part of the
+receiver's range that is actually useful for your room:
+
+1. Enable **Start volume calibration** and submit the options form.
+2. Set the receiver manually to the quietest level the slider should use, then
+   submit the first calibration step.
+3. Set the receiver manually to the loudest safe level the slider should use,
+   then submit the second step.
+4. The integration reloads with those two captured raw values as `0 %` and
+   `100 %`.
+
+The assistant only sends state queries during calibration. It never changes
+the volume itself. Normal slider operations continue to use individually
+confirmed `VU`/`VD` steps and stop if the receiver does not report the expected
+next value.
 
 ## How it works
 
@@ -160,15 +202,22 @@ This prevents generic MediaRenderers from being offered as Pioneer receivers.
 The UUID provides a stable config-entry identity, while rediscovery can update
 a changed IP address.
 
+SSDP is multicast discovery and normally stays inside its local network
+segment. A static route that carries unicast TCP does not automatically relay
+SSDP between a FRITZ!Box network and a UniFi network. In routed installations,
+automatic discovery may therefore be absent even though manual IP setup and
+all receiver controls work normally.
+
 ## Troubleshooting
 
 | Symptom | What to check |
 | --- | --- |
 | **Invalid handler specified** | Install version `0.1.1` or newer through HACS and restart Home Assistant completely |
-| Receiver is not discovered | Confirm it is on the same network/VLAN and that SSDP multicast is allowed |
-| Connection fails while off | Enable Network Standby on the receiver |
+| Receiver is not discovered across routed networks | Expected unless SSDP multicast is relayed; use manual IP configuration |
+| Connection fails while off | Enable Network Standby for power-on, or enable the preserved `off` option |
 | Port `8102` refuses connections | Close Pioneer ControlApp and other tools using the receiver connection |
 | Power-on fails but other controls work while on | Network Standby is disabled or the network interface sleeps |
+| Home Assistant volume percentage feels wrong | Run the safe two-point calibration under **Configure** |
 | Sound-mode field has no active value | Expected: the VSX-827 does not report the current mode over TCP |
 | An input is shown but cannot be selected | AirPlay and DMR are reportable but not selectable through `FN` |
 
@@ -285,6 +334,8 @@ acceptance still requires guarded validation against a real VSX-827.
 - No media playback controls.
 - No cloud service or remote-access relay.
 - Listening-mode selection without current-mode feedback.
+- Network power-on is impossible when the receiver disables its network
+  interface; the entity can still remain available as `off`.
 
 ## License
 

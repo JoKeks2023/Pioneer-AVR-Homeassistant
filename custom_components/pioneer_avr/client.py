@@ -7,7 +7,13 @@ import contextlib
 import logging
 from collections.abc import Callable
 
-from .const import SOUND_MODE_COMMANDS, SOURCE_CODES, SOURCES, VOLUME_MAX
+from .const import (
+    SOUND_MODE_COMMANDS,
+    SOURCE_CODES,
+    SOURCES,
+    VOLUME_MAX,
+    VOLUME_MIN,
+)
 from .protocol import (
     ProtocolError,
     ReceiverState,
@@ -44,11 +50,23 @@ class PioneerAVRClient:
     )
     ACTION_ATTEMPTS = 4
 
-    def __init__(self, host: str, port: int = 8102, timeout: float = 5.0) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int = 8102,
+        timeout: float = 5.0,
+        *,
+        volume_min_raw: int = VOLUME_MIN,
+        volume_max_raw: int = VOLUME_MAX,
+    ) -> None:
+        if not VOLUME_MIN <= volume_min_raw < volume_max_raw <= VOLUME_MAX:
+            raise ValueError("invalid calibrated volume range")
         self._transport = PioneerTCPTransport(host, port, timeout)
         self._transport.add_listener(self._handle_response)
         self._state = ReceiverState()
         self._listeners: list[Callable[[ReceiverState], None]] = []
+        self._volume_min_raw = volume_min_raw
+        self._volume_max_raw = volume_max_raw
         # Live VSX-827 validation showed that nnnVL is ignored. Only individual
         # VU/VD operations are safe; exact volume is not exposed.
         self._direct_volume_supported = False
@@ -76,6 +94,20 @@ class PioneerAVRClient:
         if self._direct_volume_supported is False:
             return "step"
         return "unknown"
+
+    @property
+    def volume_range_raw(self) -> tuple[int, int]:
+        """Return the calibrated raw volume endpoints."""
+        return self._volume_min_raw, self._volume_max_raw
+
+    @property
+    def volume_level(self) -> float | None:
+        """Return calibrated volume normalized for Home Assistant."""
+        raw = self._state.volume_raw
+        if raw is None:
+            return None
+        span = self._volume_max_raw - self._volume_min_raw
+        return min(1.0, max(0.0, (raw - self._volume_min_raw) / span))
 
     def add_state_listener(
         self, listener: Callable[[ReceiverState], None]
@@ -145,7 +177,11 @@ class PioneerAVRClient:
 
     async def set_volume(self, level: float) -> None:
         """Safely emulate exact volume with individually confirmed steps."""
-        target = round(min(1.0, max(0.0, level)) * VOLUME_MAX)
+        clamped = min(1.0, max(0.0, level))
+        target = round(
+            self._volume_min_raw
+            + clamped * (self._volume_max_raw - self._volume_min_raw)
+        )
         state = await self.query_state()
         current = state.volume_raw
         if current is None:

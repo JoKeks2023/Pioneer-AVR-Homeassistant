@@ -170,6 +170,64 @@ async def test_exact_volume_uses_individually_confirmed_steps() -> None:
 
 
 @pytest.mark.asyncio
+async def test_calibrated_volume_range_normalizes_and_sets_endpoint() -> None:
+    class StepTransport:
+        connected = True
+
+        def __init__(self) -> None:
+            self.volume = 21
+            self.commands: list[str] = []
+            self.listener = None
+
+        def add_listener(self, listener):  # noqa: ANN001, ANN202
+            self.listener = listener
+            return lambda: None
+
+        async def connect(self) -> None:
+            return None
+
+        async def disconnect(self) -> None:
+            return None
+
+        async def send(self, command: str) -> None:
+            self.commands.append(command)
+            if command == "VD":
+                self.volume -= 1
+            if self.listener is not None:
+                self.listener(f"VOL{self.volume:03d}")
+
+        async def request(self, command: str, expected_prefix: str) -> str:
+            return {
+                "?PWR": "PWR0",
+                "?VOL": f"VOL{self.volume:03d}",
+                "?MUT": "MUT1",
+                "?FN": "FN49",
+            }[command]
+
+    transport = StepTransport()
+    client = PioneerAVRClient(
+        "invalid", volume_min_raw=20, volume_max_raw=60
+    )
+    client._transport = transport  # type: ignore[assignment]  # noqa: SLF001
+    transport.listener = client._handle_response  # noqa: SLF001
+
+    await client.query_state()
+    assert client.volume_level == pytest.approx(0.025)
+
+    await client.set_volume(0.0)
+    assert transport.commands == ["VD"]
+    assert client.volume_level == 0.0
+
+    client._handle_response("VOL080")  # noqa: SLF001
+    assert client.volume_level == 1.0
+
+
+def test_rejects_invalid_calibrated_volume_range() -> None:
+    with pytest.raises(ValueError, match="invalid calibrated volume range"):
+        PioneerAVRClient("invalid", volume_min_raw=50, volume_max_raw=50)
+
+
+@pytest.mark.asyncio
 async def test_sound_mode_group_sends_documented_command_once() -> None:
     class CommandTransport:
         connected = True
