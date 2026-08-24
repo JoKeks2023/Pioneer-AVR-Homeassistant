@@ -1,0 +1,21 @@
+{
+  "domain": "pioneer_avr",
+  "name": "Pioneer AVR",
+  "codeowners": ["@JoKeks2023"],
+  "config_flow": true,
+  "dependencies": ["ssdp"],
+  "documentation": "https://github.com/JoKeks2023/Pioneer-AVR-Homeassistant",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/JoKeks2023/Pioneer-AVR-Homeassistant/issues",
+  "loggers": ["custom_components.pioneer_avr"],
+  "requirements": [],
+  "ssdp": [
+    {
+      "deviceType": "urn:schemas-upnp-org:device:mediarenderer:1",
+      "manufacturer": "pioneer corporation",
+      "modelName": "vsx-827/syxe8*"
+    }
+  ],
+  "version": "0.1.0"
+}

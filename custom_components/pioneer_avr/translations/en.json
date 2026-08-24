@@ -1,0 +1,44 @@
+{
+  "title": "Pioneer AVR",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to a Pioneer AV receiver",
+        "description": "Network Standby must be enabled to connect while the receiver is off.",
+        "data": {
+          "host": "Host",
+          "port": "TCP port"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Pioneer AVR",
+        "data": {
+          "host": "Host",
+          "port": "TCP port"
+        }
+      },
+      "ssdp_confirm": {
+        "title": "Add discovered Pioneer AVR",
+        "description": "Set up {name} using its local Pioneer TCP interface?"
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the receiver.",
+      "invalid_receiver": "The device did not answer with the Pioneer AVR protocol.",
+      "unknown": "Unexpected error. Check the Home Assistant logs."
+    },
+    "abort": {
+      "already_configured": "This receiver is already configured.",
+      "invalid_discovery": "The discovered device is not a supported Pioneer VSX-827.",
+      "reconfigure_successful": "The receiver configuration was updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Pioneer AVR options",
+        "description": "Use Reconfigure to change the receiver address. No model-specific options are currently available."
+      }
+    }
+  }
+}
