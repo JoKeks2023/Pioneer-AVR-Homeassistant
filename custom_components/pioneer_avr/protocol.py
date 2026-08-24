@@ -113,15 +113,8 @@ def apply_response(state: ReceiverState, response: ParsedResponse) -> ReceiverSt
     return state
 
 
-def volume_command(level: float) -> str:
-    """Create a set-volume command from a normalized level."""
-    clamped = min(1.0, max(0.0, level))
-    return f"{round(clamped * VOLUME_MAX):03d}VL"
-
-
 def source_command(code: str) -> str:
     """Create an input-selection command."""
     if len(code) != 2 or not code.isdigit():
         raise ProtocolError(f"invalid source code: {code!r}")
     return f"{code}FN"
-

@@ -12,7 +12,6 @@ from custom_components.pioneer_avr.protocol import (
     encode_command,
     parse_response,
     source_command,
-    volume_command,
 )
 
 
@@ -55,7 +54,4 @@ def test_invalid_responses(raw: str) -> None:
 
 def test_command_encoding_and_builders() -> None:
     assert encode_command("?PWR") == b"?PWR\r"
-    assert volume_command(-1) == "000VL"
-    assert volume_command(0.5) == "080VL"
-    assert volume_command(2) == "161VL"
     assert source_command("05") == "05FN"

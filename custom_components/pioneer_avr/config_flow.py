@@ -225,7 +225,7 @@ class PioneerAVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class PioneerAVROptionsFlow(config_entries.OptionsFlow):
-    """Configure offline behavior and calibrated volume endpoints."""
+    """Configure offline behavior and volume-display endpoints."""
 
     def __init__(self) -> None:
         self._pending_options: dict[str, Any] = {}
@@ -234,7 +234,7 @@ class PioneerAVROptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Configure receiver behavior or start volume calibration."""
+        """Configure receiver behavior or calibrate the volume display."""
         if user_input is not None:
             self._pending_options = dict(self.config_entry.options)
             self._pending_options[CONF_ASSUME_OFF_WHEN_UNAVAILABLE] = user_input[

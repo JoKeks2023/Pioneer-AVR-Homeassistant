@@ -40,7 +40,6 @@ class PioneerAVRMediaPlayer(
     _attr_supported_features = (
         MediaPlayerEntityFeature.TURN_ON
         | MediaPlayerEntityFeature.TURN_OFF
-        | MediaPlayerEntityFeature.VOLUME_SET
         | MediaPlayerEntityFeature.VOLUME_STEP
         | MediaPlayerEntityFeature.VOLUME_MUTE
         | MediaPlayerEntityFeature.SELECT_SOURCE
@@ -123,10 +122,6 @@ class PioneerAVRMediaPlayer(
 
     async def async_volume_down(self) -> None:
         await self.coordinator.client.volume_down()
-        await self.coordinator.async_request_refresh()
-
-    async def async_set_volume_level(self, volume: float) -> None:
-        await self.coordinator.client.set_volume(volume)
         await self.coordinator.async_request_refresh()
 
     async def async_mute_volume(self, mute: bool) -> None:

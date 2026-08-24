@@ -35,9 +35,6 @@ async def test_query_and_commands_with_fragmented_unsolicited_responses() -> Non
                     payload = f"MUT{0 if muted else 1}\r".encode()
                 elif command == "?FN":
                     payload = f"FN{source}\r".encode()
-                elif command.endswith("VL"):
-                    volume = int(command[:3])
-                    payload = f"VOL{volume:03d}\r".encode()
                 elif command == "VU":
                     volume += 1
                     payload = f"VOL{volume:03d}\r".encode()
@@ -80,11 +77,11 @@ async def test_query_and_commands_with_fragmented_unsolicited_responses() -> Non
         await client.set_mute(True)
         await client.select_input("TV")
         await asyncio.sleep(0)
-        assert "064VL" not in received
+        assert not any(command.endswith("VL") for command in received)
         assert received.count("VD") == 1
         assert "MO" in received
         assert "05FN" in received
-        assert client.volume_control_mode == "step"
+        assert client.volume_control_mode == "step_only"
     finally:
         await client.disconnect()
         server.close()
@@ -121,105 +118,18 @@ async def test_rejects_unknown_source_without_connecting() -> None:
         await client.select_input("Phono")
 
 
-@pytest.mark.asyncio
-async def test_exact_volume_uses_individually_confirmed_steps() -> None:
-    class StepTransport:
-        connected = True
+def test_calibrated_volume_range_only_normalizes_display() -> None:
+    client = PioneerAVRClient("invalid", volume_min_raw=20, volume_max_raw=60)
 
-        def __init__(self) -> None:
-            self.volume = 19
-            self.commands: list[str] = []
-            self.listener = None
-
-        def add_listener(self, listener):  # noqa: ANN001, ANN202
-            self.listener = listener
-            return lambda: None
-
-        async def connect(self) -> None:
-            return None
-
-        async def disconnect(self) -> None:
-            return None
-
-        async def send(self, command: str) -> None:
-            self.commands.append(command)
-            if command == "VD":
-                self.volume -= 1
-            elif command == "VU":
-                self.volume += 1
-            if self.listener is not None:
-                self.listener(f"VOL{self.volume:03d}")
-
-        async def request(self, command: str, expected_prefix: str) -> str:
-            return {
-                "?PWR": "PWR0",
-                "?VOL": f"VOL{self.volume:03d}",
-                "?MUT": "MUT1",
-                "?FN": "FN49",
-            }[command]
-
-    transport = StepTransport()
-    client = PioneerAVRClient("invalid")
-    client._transport = transport  # type: ignore[assignment]  # noqa: SLF001
-    transport.listener = client._handle_response  # noqa: SLF001
-    await client.set_volume(17 / 161)
-
-    assert transport.commands == ["VD", "VD"]
-    assert client.state.volume_raw == 17
-    assert client.volume_control_mode == "step"
-
-
-@pytest.mark.asyncio
-async def test_calibrated_volume_range_normalizes_and_sets_endpoint() -> None:
-    class StepTransport:
-        connected = True
-
-        def __init__(self) -> None:
-            self.volume = 21
-            self.commands: list[str] = []
-            self.listener = None
-
-        def add_listener(self, listener):  # noqa: ANN001, ANN202
-            self.listener = listener
-            return lambda: None
-
-        async def connect(self) -> None:
-            return None
-
-        async def disconnect(self) -> None:
-            return None
-
-        async def send(self, command: str) -> None:
-            self.commands.append(command)
-            if command == "VD":
-                self.volume -= 1
-            if self.listener is not None:
-                self.listener(f"VOL{self.volume:03d}")
-
-        async def request(self, command: str, expected_prefix: str) -> str:
-            return {
-                "?PWR": "PWR0",
-                "?VOL": f"VOL{self.volume:03d}",
-                "?MUT": "MUT1",
-                "?FN": "FN49",
-            }[command]
-
-    transport = StepTransport()
-    client = PioneerAVRClient(
-        "invalid", volume_min_raw=20, volume_max_raw=60
-    )
-    client._transport = transport  # type: ignore[assignment]  # noqa: SLF001
-    transport.listener = client._handle_response  # noqa: SLF001
-
-    await client.query_state()
+    client._handle_response("VOL021")  # noqa: SLF001
     assert client.volume_level == pytest.approx(0.025)
 
-    await client.set_volume(0.0)
-    assert transport.commands == ["VD"]
+    client._handle_response("VOL020")  # noqa: SLF001
     assert client.volume_level == 0.0
 
     client._handle_response("VOL080")  # noqa: SLF001
     assert client.volume_level == 1.0
+    assert client.volume_control_mode == "step_only"
 
 
 def test_rejects_invalid_calibrated_volume_range() -> None:

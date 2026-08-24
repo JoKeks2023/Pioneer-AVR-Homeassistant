@@ -37,19 +37,19 @@
     "step": {
       "init": {
         "title": "Pioneer-AVR-Optionen",
-        "description": "Lege fest, wie ein ausgeschalteter und nicht erreichbarer Receiver angezeigt wird, oder starte eine sichere Zwei-Punkt-Lautstärkekalibrierung.",
+        "description": "Lege fest, wie ein ausgeschalteter und nicht erreichbarer Receiver angezeigt wird, oder kalibriere die angezeigte Lautstärke. Die Kalibrierung ermöglicht keine exakte Ziel-Lautstärke.",
         "data": {
           "assume_off_when_unavailable": "Bei Nichterreichbarkeit nach dem Ausschalten als aus anzeigen",
-          "calibrate_volume": "Lautstärkekalibrierung starten"
+          "calibrate_volume": "Angezeigten Lautstärkebereich kalibrieren"
         }
       },
       "calibration_min": {
-        "title": "Leisen Lautstärke-Endpunkt festlegen",
-        "description": "Stelle am Receiver die leiseste Lautstärke ein, die der Home-Assistant-Regler verwenden soll, und wähle dann Senden. Die Integration liest den Wert nur aus und verändert die Lautstärke nicht."
+        "title": "Leisen Anzeige-Endpunkt festlegen",
+        "description": "Stelle am Receiver die Lautstärke ein, die als 0 % angezeigt werden soll, und wähle dann Senden. Die Integration liest den Wert nur aus und verändert die Lautstärke nicht."
       },
       "calibration_max": {
-        "title": "Lauten Lautstärke-Endpunkt festlegen",
-        "description": "Der leise Endpunkt wurde als Rohwert {minimum} gespeichert. Stelle nun am Receiver die höchste sichere Lautstärke ein und wähle dann Senden. Die Integration liest den Wert nur aus."
+        "title": "Lauten Anzeige-Endpunkt festlegen",
+        "description": "Der 0-%-Endpunkt wurde als Rohwert {minimum} gespeichert. Stelle nun am Receiver die Lautstärke ein, die als 100 % angezeigt werden soll, und wähle dann Senden. Die Integration liest den Wert nur aus."
       }
     },
     "error": {

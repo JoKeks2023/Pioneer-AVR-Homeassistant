@@ -37,7 +37,7 @@ async def async_get_config_entry_diagnostics(
             "power",
             "volume_state",
             "volume_step",
-            "volume_set_safe_emulation",
+            "volume_display_calibration",
             "mute",
             "source",
             "listening_mode_groups",

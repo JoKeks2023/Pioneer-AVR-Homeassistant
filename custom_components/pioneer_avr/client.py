@@ -67,9 +67,6 @@ class PioneerAVRClient:
         self._listeners: list[Callable[[ReceiverState], None]] = []
         self._volume_min_raw = volume_min_raw
         self._volume_max_raw = volume_max_raw
-        # Live VSX-827 validation showed that nnnVL is ignored. Only individual
-        # VU/VD operations are safe; exact volume is not exposed.
-        self._direct_volume_supported = False
 
     @property
     def connected(self) -> bool:
@@ -88,12 +85,8 @@ class PioneerAVRClient:
 
     @property
     def volume_control_mode(self) -> str:
-        """Return how exact volume is implemented for this receiver session."""
-        if self._direct_volume_supported is True:
-            return "direct"
-        if self._direct_volume_supported is False:
-            return "step"
-        return "unknown"
+        """Return the verified volume control mode."""
+        return "step_only"
 
     @property
     def volume_range_raw(self) -> tuple[int, int]:
@@ -175,25 +168,6 @@ class PioneerAVRClient:
         """Send one main-zone volume-down command without retrying it."""
         await self._send("VD")
 
-    async def set_volume(self, level: float) -> None:
-        """Safely emulate exact volume with individually confirmed steps."""
-        clamped = min(1.0, max(0.0, level))
-        target = round(
-            self._volume_min_raw
-            + clamped * (self._volume_max_raw - self._volume_min_raw)
-        )
-        state = await self.query_state()
-        current = state.volume_raw
-        if current is None:
-            raise PioneerAVRProtocolError("receiver did not report its volume")
-        while current != target:
-            expected = current + 1 if target > current else current - 1
-            command = "VU" if target > current else "VD"
-            state = await self._send_volume_step(command, expected)
-            current = state.volume_raw
-            if current is None:
-                raise PioneerAVRProtocolError("receiver did not report its volume")
-
     async def set_mute(self, muted: bool) -> None:
         """Set main-zone mute."""
         await self._send_and_confirm(
@@ -263,36 +237,6 @@ class PioneerAVRClient:
             f"receiver did not confirm {operation} after "
             f"{self.ACTION_ATTEMPTS} attempts"
         )
-
-    async def _send_volume_step(
-        self, command: str, expected_volume: int
-    ) -> ReceiverState:
-        """Send one non-idempotent volume step without ever retrying it."""
-        loop = asyncio.get_running_loop()
-        confirmed: asyncio.Future[ReceiverState] = loop.create_future()
-
-        def handle_state(state: ReceiverState) -> None:
-            if state.volume_raw == expected_volume and not confirmed.done():
-                confirmed.set_result(state)
-
-        remove_listener = self.add_state_listener(handle_state)
-        try:
-            await self._send(command)
-            if self._state.volume_raw == expected_volume:
-                return self._state
-            try:
-                return await asyncio.wait_for(confirmed, 1.5)
-            except TimeoutError:
-                await asyncio.sleep(0.5)
-                state = await self.query_state()
-                if state.volume_raw == expected_volume:
-                    return state
-                raise PioneerAVRProtocolError(
-                    f"volume step expected {expected_volume}, "
-                    f"received {state.volume_raw!r}; command was not retried"
-                ) from None
-        finally:
-            remove_listener()
 
     def _handle_response(self, raw: str) -> None:
         try:

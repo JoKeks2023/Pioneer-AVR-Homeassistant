@@ -51,7 +51,7 @@ automatic SSDP discovery, a UI config flow, immediate TCP state updates, and a
 | Power on and off | ✅ | Powered-off receivers can remain represented as `off` |
 | Volume display | ✅ | Normalized to Home Assistant's `0.0–1.0` range |
 | Volume up and down | ✅ | Native `VU` / `VD` commands |
-| Volume slider | ✅ | Confirmed steps with optional two-point calibration |
+| Exact volume / volume slider | — | Not exposed: this receiver ignores direct target commands and its step reports are not linear |
 | Mute and unmute | ✅ | State is queried and confirmed |
 | Current input | ✅ | Receiver-reported source |
 | Input selection | ✅ | Confirmed Pioneer source codes |
@@ -121,7 +121,7 @@ restart Home Assistant.
 The setup flow opens a local TCP connection and requires a valid Pioneer power
 response before it creates the config entry. YAML configuration is not used.
 
-## Receiver options and volume calibration
+## Receiver options and volume-display calibration
 
 Open **Settings → Devices & services → Pioneer AVR → Configure**.
 
@@ -138,24 +138,23 @@ option also allows the existing entity to load as an assumed `off` receiver.
 Disable the option if every unreachable state should instead be treated as a
 setup failure.
 
-### Safe two-point volume calibration
+### Two-point volume-display calibration
 
 Pioneer reports volume in raw half-steps, while Home Assistant requires a
-normalized `0–100 %` slider. Calibration maps the slider to the part of the
-receiver's range that is actually useful for your room:
+normalized `0–100 %` value. Calibration maps the displayed percentage to the
+part of the receiver's range that is actually useful for your room:
 
-1. Enable **Start volume calibration** and submit the options form.
-2. Set the receiver manually to the quietest level the slider should use, then
+1. Enable **Calibrate displayed volume range** and submit the options form.
+2. Set the receiver manually to the level that should display as `0 %`, then
    submit the first calibration step.
-3. Set the receiver manually to the loudest safe level the slider should use,
+3. Set the receiver manually to the level that should display as `100 %`,
    then submit the second step.
-4. The integration reloads with those two captured raw values as `0 %` and
-   `100 %`.
+4. The integration reloads and maps the captured endpoints to `0 %` and `100 %`.
 
 The assistant only sends state queries during calibration. It never changes
-the volume itself. Normal slider operations continue to use individually
-confirmed `VU`/`VD` steps and stop if the receiver does not report the expected
-next value.
+the volume itself. Calibration changes only the displayed percentage; it does
+not add exact target-volume control. Use Home Assistant's volume-up and
+volume-down actions for control.
 
 ## How it works
 
@@ -169,11 +168,12 @@ incoming state update cannot be mistaken for the reply to another command.
 Connection loss, timeouts, malformed responses, and reconnects are handled by
 the integration's built-in asynchronous client.
 
-The VSX-827 ignores the documented direct `nnnVL` exact-volume command. To keep
-the Home Assistant slider useful and safe, the integration sends one `VU` or
-`VD` step, waits for the exact next `VOLnnn` response, and only then continues.
-It stops immediately if a step is not confirmed and never retries a
-non-idempotent volume step.
+The tested VSX-827 ignores the documented direct `nnnVL` exact-volume command.
+Hardware testing also showed that one `VU` or `VD` command does not always
+change the reported raw value by exactly one. The integration therefore does
+not advertise Home Assistant's `VOLUME_SET` feature and never simulates a
+target value with a sequence of steps. Volume up and down each send exactly one
+native command.
 
 Listening-mode selection mirrors the three buttons in Pioneer ControlApp:
 
@@ -217,7 +217,8 @@ all receiver controls work normally.
 | Connection fails while off | Enable Network Standby for power-on, or enable the preserved `off` option |
 | Port `8102` refuses connections | Close Pioneer ControlApp and other tools using the receiver connection |
 | Power-on fails but other controls work while on | Network Standby is disabled or the network interface sleeps |
-| Home Assistant volume percentage feels wrong | Run the safe two-point calibration under **Configure** |
+| Home Assistant volume percentage feels wrong | Calibrate the displayed range under **Configure**; this affects display only |
+| A `media_player.volume_set` automation fails | Exact target volume is intentionally unsupported; use `media_player.volume_up` or `media_player.volume_down` |
 | Sound-mode field has no active value | Expected: the VSX-827 does not report the current mode over TCP |
 | An input is shown but cannot be selected | AirPlay and DMR are reportable but not selectable through `FN` |
 
@@ -273,7 +274,7 @@ hardware testing.
 | Power on/off | `PO` / `PF` | `PWR0` / `PWR1` or `PWR2` | Implemented |
 | Power query | `?PWR` | `PWRn` | Implemented |
 | Volume up/down | `VU` / `VD` | `VOLnnn` | Implemented |
-| Exact volume | Confirmed `VU`/`VD` sequence | `VOLnnn` after each step | Safely emulated |
+| Exact volume | `nnnVL` / repeated `VU`/`VD` | Ignored / non-linear reports | Not exposed |
 | Volume query | `?VOL` | `VOLnnn` | Implemented |
 | Mute on/off | `MO` / `MF` | `MUT0` / `MUT1` | Implemented |
 | Mute query | `?MUT` | `MUTn` | Implemented |
@@ -323,7 +324,7 @@ python3 -m compileall custom_components scripts tests
 
 The automated suite uses a local fake receiver and covers command encoding,
 fragmented and unsolicited replies, malformed responses, timeouts, serialized
-commands, reconnect behavior, state conversion, and safe volume stepping. Live
+commands, reconnect behavior, state conversion, and single volume steps. Live
 acceptance still requires guarded validation against a real VSX-827.
 
 ## Scope and limitations
@@ -332,6 +333,7 @@ acceptance still requires guarded validation against a real VSX-827.
 - TCP/IP only; no serial configuration or adapter.
 - No independent Speaker B / Zone 2 entity.
 - No media playback controls.
+- No exact target-volume action or volume slider; use volume up/down.
 - No cloud service or remote-access relay.
 - Listening-mode selection without current-mode feedback.
 - Network power-on is impossible when the receiver disables its network
