@@ -1,166 +1,203 @@
+<div align="center">
+
 # Pioneer AVR for Home Assistant
 
-Local Home Assistant control for the Pioneer VSX-827 over its Ethernet
-connection. The receiver is represented as a Home Assistant **AV receiver**: a
-`media_player` entity whose device class is `receiver`.
+**Local control for the Pioneer VSX-827 over its native Ethernet interface.**
 
-This project has no cloud dependency. Version 0.1 supports the main zone only
-and intentionally limits itself to the VSX-827 control families that can be
-validated against Pioneer's 2012 protocol.
+No cloud. No serial adapter. Just Home Assistant and TCP port `8102`.
 
-## VSX-827 control-interface research
+[![Release](https://img.shields.io/github/v/release/JoKeks2023/Pioneer-AVR-Homeassistant?style=for-the-badge&logo=github&color=2ea44f)](https://github.com/JoKeks2023/Pioneer-AVR-Homeassistant/releases/latest)
+[![Validation](https://img.shields.io/github/actions/workflow/status/JoKeks2023/Pioneer-AVR-Homeassistant/validate.yml?branch=main&style=for-the-badge&label=validation)](https://github.com/JoKeks2023/Pioneer-AVR-Homeassistant/actions/workflows/validate.yml)
+[![Home Assistant](https://img.shields.io/badge/Home_Assistant-2024.12%2B-18BCF2?style=for-the-badge&logo=homeassistant&logoColor=white)](https://www.home-assistant.io/)
+[![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5?style=for-the-badge&logo=homeassistantcommunitystore&logoColor=white)](https://hacs.xyz/)
+[![License](https://img.shields.io/github/license/JoKeks2023/Pioneer-AVR-Homeassistant?style=for-the-badge&color=blue)](LICENSE)
 
-The VSX-827 has Ethernet, AirPlay, DLNA, Internet Radio, and support for
-Pioneer's ControlApp. Pioneer's product page lists the Ethernet connection and
-ControlApp support:
+[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=JoKeks2023&repository=Pioneer-AVR-Homeassistant&category=integration)
 
-- [Pioneer VSX-827 product information](https://www.pioneer-audiovisual.de/uk/node/408/)
-- [Pioneer VSX-827/527 operating manual](https://www.homesound.ro/manuals/VSX-527-827.pdf)
+[Features](#features) · [Installation](#installation) · [Setup](#receiver-setup) · [Troubleshooting](#troubleshooting) · [Protocol](#protocol-and-hardware-notes) · [Development](#development)
 
-The receiver accepts Pioneer's text command protocol over a TCP socket on port
-`8102`. A VSX-827 owner report specifically confirms successful control on
-8102; it also notes that an open ControlApp session can consume a receiver
-connection:
+</div>
 
-- [VSX-827 port 8102 field report](https://homematic-forum.de/forum/viewtopic.php?f=31&start=30&t=12267)
+---
 
-Pioneer's 2012 external-command document describes its command list as common
-to IP control and RS-232C. The open VSX-1022 command transcript provides the
-power, volume, mute, input, and query forms used here:
+Pioneer AVR represents the VSX-827 as a proper Home Assistant **AV receiver**.
+It creates one main-zone `media_player` entity with the receiver device class,
+automatic SSDP discovery, a UI config flow, immediate TCP state updates, and a
+30-second fallback refresh.
 
-- [2012 Pioneer IP and RS-232 command-document summary](https://www.scribd.com/document/621112255/Elite-Pioneer-Fy13avr-Ip-Rs-232-5-8-12-1)
-- [VSX-1022 protocol transcript](https://github.com/schaffman5/VSX-1022_Commands/blob/master/Pioneer_VSX-1022_Commands_2012.txt)
-- [Existing Home Assistant Pioneer integration](https://www.home-assistant.io/integrations/pioneer/)
+> [!IMPORTANT]
+> Enable **Network Standby** in the receiver's Network Setup menu. Without it,
+> the Ethernet interface may become unreachable when the receiver is off.
 
-The VSX-827 does **not** have a physical RS-232 connector. Its rear-panel
-connections list Ethernet but no serial port. Consequently this integration
-uses LAN/TCP directly and requires no USB or serial adapter. Although the
-receiver has a Speaker B mode, it is not an independently powered, sourced,
-and volume-controlled Zone 2, so this integration does not create a Zone 2
-entity.
+## At a glance
 
-### Command status
+| | |
+| --- | --- |
+| **Supported receiver** | Pioneer VSX-827 / VSX-827-S |
+| **Connection** | Local Ethernet, persistent TCP |
+| **Default port** | `8102` |
+| **Home Assistant entity** | `media_player` with `receiver` device class |
+| **Zones** | Main zone only |
+| **Minimum Home Assistant** | 2024.12 |
+| **Cloud account** | Not required |
+| **Additional hardware** | Not required |
 
-| Function | TCP command | Reply | Status |
-| --- | --- | --- | --- |
-| Power on/off | `PO` / `PF` | `PWR0` / `PWR1` or `PWR2` | Implemented |
-| Power query | `?PWR` | `PWRn` | Implemented |
-| Volume up/down | `VU` / `VD` | `VOLnnn` update | Implemented |
-| Exact volume | confirmed `VU`/`VD` sequence | `VOLnnn` after every step | Safely emulated |
-| Volume query | `?VOL` | `VOLnnn` | Implemented |
-| Mute on/off | `MO` / `MF` | `MUT0` / `MUT1` | Implemented |
-| Mute query | `?MUT` | `MUTn` | Implemented |
-| Select input | `nnFN` | `FNnn` | Implemented |
-| Input query | `?FN` | `FNnn` | Implemented |
-| Listening-mode groups | `0005SR`, `0010SR`, `0100SR` | generic `R` | Implemented without current-mode state |
-| Independent Zone 2 | model dependent | model dependent | Not supported by VSX-827 hardware |
+## Features
 
-These commands are documented for the relevant 2012 Pioneer protocol family.
-Run the guarded hardware validation below before treating every write command
-as confirmed on an individual VSX-827 and firmware version.
+| Capability | Support | Notes |
+| --- | :---: | --- |
+| Power on and off | ✅ | Network Standby is required for power-on |
+| Volume display | ✅ | Normalized to Home Assistant's `0.0–1.0` range |
+| Volume up and down | ✅ | Native `VU` / `VD` commands |
+| Volume slider | ✅ | Safely emulated with individually confirmed steps |
+| Mute and unmute | ✅ | State is queried and confirmed |
+| Current input | ✅ | Receiver-reported source |
+| Input selection | ✅ | Confirmed Pioneer source codes |
+| Listening-mode groups | ✅ | Auto/Direct, Standard/ALC, Advanced Surround |
+| Current listening-mode name | ⚠️ | VSX-827 returns only a generic acknowledgement |
+| Automatic discovery | ✅ | Precise model/manufacturer SSDP match |
+| Reconfiguration and diagnostics | ✅ | Host is redacted from diagnostics |
+| Speaker B as Zone 2 | — | Not an independent VSX-827 zone |
+| Media playback controls | — | Not part of the receiver control protocol |
 
-Live VSX-827 tests confirmed TCP port `8102`, the long-form power, volume, mute,
-and input queries, mute control, and input selection from Game to CD. The
-receiver ignored both three-digit `nnnVL` and two-digit `nnVL` exact-volume
-commands while continuing to report its old volume. The Home Assistant slider
-is therefore implemented conservatively: it sends one `VU` or `VD`, waits for
-the exact next `VOLnnn` state, and only then sends the next step. If any step is
-not confirmed, the operation stops without retrying that non-idempotent command.
-A later run also demonstrated that the receiver can
-occasionally ignore a valid mute command. Idempotent mute, source, and volume
-state operations are queried instead of being assumed successful. Mute and
-source commands may be safely retried because setting the same target again
-cannot overshoot it.
-
-## Home Assistant features
-
-- Power on and off
-- Current volume display, single-step control, and safely emulated exact volume
-- Mute and unmute
-- Current input and input selection
-- Immediate handling of unsolicited receiver updates plus a 30-second refresh
-- Config flow, reconfiguration, device registry, availability, and sanitized
-  diagnostics
-
-The known input map includes CD, Tuner, DVD, TV, SAT/CBL, Video, DVR/BDR,
+Supported source names include CD, Tuner, DVD, TV, SAT/CBL, Video, DVR/BDR,
 iPod/USB, BD, Adapter Port, Internet Radio, Pandora, Media Server, Favorites,
-AirPlay, DMR, and Game. AirPlay and DMR can be reported as the current source
-but are not offered for direct selection because the 2012 command notes state
-that they cannot be selected with an `FN` command.
-
-The receiver's ControlApp documentation and 2012 command list confirm three
-listening-mode button groups. Home Assistant exposes **Auto / Direct**,
-**Standard / ALC**, and **Advanced Surround**. Selecting one sends `0005SR`,
-`0010SR`, or `0100SR` once. The VSX-827 returns only the generic `R` response to
-all tested current-mode queries (`?S`, `?SR`, `?L`, and `?LM`), so the
-integration intentionally does not claim a current sound-mode state. The
-selected group may cycle among modes depending on the current source and audio
-signal, matching Pioneer ControlApp behavior.
-
-### Automatic discovery
-
-The VSX-827 advertises itself as a UPnP MediaRenderer. Its device description
-provides all data needed for precise SSDP discovery:
-
-- manufacturer `PIONEER CORPORATION`
-- model `VSX-827/SYXE8`
-- `X_ipRemoteReady=1`
-- `X_ipRemoteTcpPort=8102`
-- a stable UPnP UUID
-
-Home Assistant uses that model/manufacturer match to offer the discovered AVR
-in **Settings → Devices & services**. The UUID becomes the stable config-entry
-identity, and rediscovery can update a changed IP address.
-
-## Receiver setup
-
-1. Connect the VSX-827 to the same local network as Home Assistant using its
-   Ethernet port.
-2. Give it a stable DHCP reservation.
-3. In the receiver's Network Setup menu, enable **Network Standby**. Without
-   this setting the network interface may shut down with the main zone, making
-   power-on over TCP impossible.
-4. Close Pioneer ControlApp while testing. Older receivers permit only a small
-   number of simultaneous control connections.
+AirPlay, DMR, and Game. AirPlay and DMR can be reported as the active source,
+but the Pioneer protocol does not allow selecting them with an `FN` command.
 
 ## Installation
 
+### HACS — recommended
+
+Use the button below to open this custom repository directly in HACS:
+
+[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=JoKeks2023&repository=Pioneer-AVR-Homeassistant&category=integration)
+
+Alternatively, add it manually:
+
+1. Open **HACS → Integrations**.
+2. Open the three-dot menu and select **Custom repositories**.
+3. Add the following URL with category **Integration**:
+
+   ```text
+   https://github.com/JoKeks2023/Pioneer-AVR-Homeassistant
+   ```
+
+4. Download **Pioneer AVR**.
+5. Restart Home Assistant completely.
+
+Already installed? Use **Redownload** in HACS to select a newer release, then
+restart Home Assistant.
+
 ### Manual
 
-1. Copy `custom_components/pioneer_avr` into the `custom_components` directory
-   inside your Home Assistant configuration directory.
-2. Restart Home Assistant.
-3. Go to **Settings → Devices & services → Add integration**.
-4. Search for **Pioneer AVR**.
-5. Enter the receiver's hostname/IP and TCP port. The default is `8102`.
+1. Download the
+   [latest release](https://github.com/JoKeks2023/Pioneer-AVR-Homeassistant/releases/latest).
+2. Copy `custom_components/pioneer_avr` to the `custom_components` directory
+   inside the Home Assistant configuration directory.
+3. Restart Home Assistant completely.
 
-The setup flow opens a connection and requires a valid Pioneer power response
-before creating the entry. YAML configuration is not supported.
+## Receiver setup
 
-### HACS custom repository
+1. Connect the VSX-827 by Ethernet to the same local network as Home Assistant.
+2. Create a stable DHCP reservation for the receiver.
+3. Enable **Network Standby** in the receiver's Network Setup menu.
+4. Close Pioneer ControlApp during setup; the receiver supports only a small
+   number of simultaneous control connections.
+5. In Home Assistant, open **Settings → Devices & services**. Accept the
+   discovered receiver, or select **Add integration** and search for
+   **Pioneer AVR**.
+6. For manual setup, enter the receiver's hostname or IP address and port
+   `8102`.
 
-Until this repository is published in the HACS default store, add its GitHub
-URL in HACS as a custom repository with category **Integration**, install
-**Pioneer AVR**, restart Home Assistant, and then follow the UI setup above.
+[![Open your Home Assistant instance and start setting up Pioneer AVR.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=pioneer_avr)
 
-Repository URL:
+The setup flow opens a local TCP connection and requires a valid Pioneer power
+response before it creates the config entry. YAML configuration is not used.
+
+## How it works
 
 ```text
-https://github.com/JoKeks2023/Pioneer-AVR-Homeassistant
+Home Assistant  ⇄  persistent TCP connection on port 8102  ⇄  Pioneer VSX-827
 ```
 
-## Debugging and hardware validation
+Commands are CR-terminated Pioneer protocol messages. Replies and unsolicited
+updates may use CR or LF separators. Requests are serialized so that an
+incoming state update cannot be mistaken for the reply to another command.
+Connection loss, timeouts, malformed responses, and reconnects are handled by
+the integration's built-in asynchronous client.
 
-The standalone tool imports the same asynchronous client as Home Assistant and
-does not require Home Assistant itself.
+The VSX-827 ignores the documented direct `nnnVL` exact-volume command. To keep
+the Home Assistant slider useful and safe, the integration sends one `VU` or
+`VD` step, waits for the exact next `VOLnnn` response, and only then continues.
+It stops immediately if a step is not confirmed and never retries a
+non-idempotent volume step.
 
-Query basic state:
+Listening-mode selection mirrors the three buttons in Pioneer ControlApp:
+
+- **Auto / Direct** — `0005SR`
+- **Standard / ALC** — `0010SR`
+- **Advanced Surround** — `0100SR`
+
+The receiver returns only `R` to tested mode-status queries, so Home Assistant
+does not display a potentially incorrect current mode. Selecting a group may
+cycle between modes depending on the source and incoming audio signal.
+
+## Automatic discovery
+
+The VSX-827 advertises itself as a UPnP MediaRenderer. The integration uses a
+specific combination of values from its device description:
+
+| UPnP field | Expected value |
+| --- | --- |
+| Manufacturer | `PIONEER CORPORATION` |
+| Model | `VSX-827/SYXE8` |
+| IP remote ready | `1` |
+| TCP port | `8102` |
+| Identity | Stable UPnP UUID |
+
+This prevents generic MediaRenderers from being offered as Pioneer receivers.
+The UUID provides a stable config-entry identity, while rediscovery can update
+a changed IP address.
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| **Invalid handler specified** | Install version `0.1.1` or newer through HACS and restart Home Assistant completely |
+| Receiver is not discovered | Confirm it is on the same network/VLAN and that SSDP multicast is allowed |
+| Connection fails while off | Enable Network Standby on the receiver |
+| Port `8102` refuses connections | Close Pioneer ControlApp and other tools using the receiver connection |
+| Power-on fails but other controls work while on | Network Standby is disabled or the network interface sleeps |
+| Sound-mode field has no active value | Expected: the VSX-827 does not report the current mode over TCP |
+| An input is shown but cannot be selected | AirPlay and DMR are reportable but not selectable through `FN` |
+
+Enable focused debug logging if needed:
+
+```yaml
+logger:
+  logs:
+    custom_components.pioneer_avr: debug
+```
+
+Logs include connection failures and response categories, but not the
+configured host or complete raw traffic. Downloadable diagnostics redact the
+host as well. When reporting a problem, attach the diagnostics and the relevant
+`pioneer_avr` log entries to a
+[GitHub issue](https://github.com/JoKeks2023/Pioneer-AVR-Homeassistant/issues).
+
+## Debug tool and hardware validation
+
+The standalone tool uses the exact same asynchronous client as the Home
+Assistant integration. Home Assistant itself is not required to run it.
+
+Query the receiver:
 
 ```bash
 python3 scripts/debug_receiver.py 192.0.2.10 --query
 ```
 
-Send a raw documented command and wait for a particular reply prefix:
+Send a documented raw command:
 
 ```bash
 python3 scripts/debug_receiver.py 192.0.2.10 --command '?PWR' --expect PWR
@@ -172,28 +209,62 @@ Run guarded state-changing validation:
 python3 scripts/debug_receiver.py 192.0.2.10 --validate
 ```
 
-The guarded test records the initial state, powers on if necessary, verifies
-mute, leaves volume unchanged, checks a temporary input, and restores the
-original power, mute, and selectable input in a `finally` block. Every tested
-operation prints `PASS` only after a fresh state query confirms it, followed by
-the final restored state. Keep
-speakers and connected equipment in a safe state whenever testing receiver
-control.
+Validation records the initial state, verifies each operation with a fresh
+query, and restores the original power, mute, and selectable input in a
+`finally` block. Keep speakers and connected equipment in a safe state during
+hardware testing.
 
-Enable debug logging in Home Assistant if needed:
+## Protocol and hardware notes
 
-```yaml
-logger:
-  logs:
-    custom_components.pioneer_avr: debug
-```
+<details>
+<summary><strong>Verified command table</strong></summary>
 
-Logs record response prefixes and connection failures, not the configured host
-or raw receiver payload. Downloadable diagnostics redact the host.
+| Function | TCP command | Reply | Status |
+| --- | --- | --- | --- |
+| Power on/off | `PO` / `PF` | `PWR0` / `PWR1` or `PWR2` | Implemented |
+| Power query | `?PWR` | `PWRn` | Implemented |
+| Volume up/down | `VU` / `VD` | `VOLnnn` | Implemented |
+| Exact volume | Confirmed `VU`/`VD` sequence | `VOLnnn` after each step | Safely emulated |
+| Volume query | `?VOL` | `VOLnnn` | Implemented |
+| Mute on/off | `MO` / `MF` | `MUT0` / `MUT1` | Implemented |
+| Mute query | `?MUT` | `MUTn` | Implemented |
+| Select input | `nnFN` | `FNnn` | Implemented |
+| Input query | `?FN` | `FNnn` | Implemented |
+| Listening-mode groups | `0005SR`, `0010SR`, `0100SR` | Generic `R` | Selection only |
+| Independent Zone 2 | Model dependent | Model dependent | Not available on VSX-827 |
+
+</details>
+
+<details>
+<summary><strong>Research findings and sources</strong></summary>
+
+The VSX-827 has Ethernet, AirPlay, DLNA, Internet Radio, and Pioneer ControlApp
+support. Its rear-panel connections include Ethernet but no physical RS-232
+connector. Pioneer describes its 2012 external command set as common to IP
+control and RS-232C; the VSX-827 uses that syntax directly over TCP port `8102`.
+No serial cable, USB adapter, or cloud service is involved.
+
+Speaker B is not an independently powered, sourced, and volume-controlled Zone
+2 on this model, so the integration intentionally creates only one main-zone
+entity.
+
+Sources:
+
+- [Pioneer VSX-827 product information](https://www.pioneer-audiovisual.de/uk/node/408/)
+- [Pioneer VSX-827/527 operating manual](https://www.homesound.ro/manuals/VSX-527-827.pdf)
+- [VSX-827 TCP port 8102 field report](https://homematic-forum.de/forum/viewtopic.php?f=31&start=30&t=12267)
+- [2012 Pioneer IP and RS-232 command-document summary](https://www.scribd.com/document/621112255/Elite-Pioneer-Fy13avr-Ip-Rs-232-5-8-12-1)
+- [VSX-1022 protocol-family transcript](https://github.com/schaffman5/VSX-1022_Commands/blob/master/Pioneer_VSX-1022_Commands_2012.txt)
+- [Home Assistant Pioneer integration](https://www.home-assistant.io/integrations/pioneer/)
+
+Live VSX-827 validation confirmed TCP port `8102`, long-form power, volume,
+mute and input queries, mute control, and input selection. It also confirmed
+that direct two- and three-digit exact-volume commands are ignored by the
+tested receiver firmware.
+
+</details>
 
 ## Development
-
-Install the test tools in a virtual environment, then run:
 
 ```bash
 pytest
@@ -201,15 +272,22 @@ ruff check .
 python3 -m compileall custom_components scripts tests
 ```
 
-The network tests use a local fake receiver and cover fragmented replies,
-unsolicited updates, state parsing, and serialized commands. Live acceptance
-still requires `scripts/debug_receiver.py --validate` against the target
-VSX-827.
+The automated suite uses a local fake receiver and covers command encoding,
+fragmented and unsolicited replies, malformed responses, timeouts, serialized
+commands, reconnect behavior, state conversion, and safe volume stepping. Live
+acceptance still requires guarded validation against a real VSX-827.
 
-## Current limitations
+## Scope and limitations
 
-- VSX-827 main zone only; Speaker B is not exposed as Zone 2.
-- TCP/IP only; the receiver has no RS-232 socket and needs no adapter.
-- Listening-mode selection has no current-state feedback because the VSX-827
-  returns only `R` to all documented mode queries.
-- No cloud features or remote access outside the local network.
+- Pioneer VSX-827 main zone only.
+- TCP/IP only; no serial configuration or adapter.
+- No independent Speaker B / Zone 2 entity.
+- No media playback controls.
+- No cloud service or remote-access relay.
+- Listening-mode selection without current-mode feedback.
+
+## License
+
+Released under the [MIT License](LICENSE). You may use, modify, and distribute
+the project while retaining its copyright and license notice. The software is
+provided without warranty.
