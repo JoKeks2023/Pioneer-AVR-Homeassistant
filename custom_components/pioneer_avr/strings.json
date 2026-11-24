@@ -59,5 +59,13 @@
       "unknown": "Unexpected error. Check the Home Assistant logs.",
       "volume_not_reported": "The receiver did not report its current volume."
     }
+  },
+  "exceptions": {
+    "cannot_connect": {
+      "message": "Could not reach the receiver: {error}"
+    },
+    "command_failed": {
+      "message": "The receiver did not carry out the command: {error}"
+    }
   }
 }

@@ -59,5 +59,13 @@
       "unknown": "Unerwarteter Fehler. Bitte die Home-Assistant-Protokolle prüfen.",
       "volume_not_reported": "Der Receiver hat seine aktuelle Lautstärke nicht gemeldet."
     }
+  },
+  "exceptions": {
+    "cannot_connect": {
+      "message": "Receiver nicht erreichbar: {error}"
+    },
+    "command_failed": {
+      "message": "Der Receiver hat den Befehl nicht ausgeführt: {error}"
+    }
   }
 }

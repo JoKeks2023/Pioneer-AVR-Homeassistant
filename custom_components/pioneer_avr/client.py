@@ -49,6 +49,8 @@ class PioneerAVRClient:
         ("?FN", "FN", ResponseKind.SOURCE),
     )
     ACTION_ATTEMPTS = 4
+    POWER_ON_ATTEMPTS = 3
+    POWER_ON_SETTLE = 1.5
 
     def __init__(
         self,
@@ -114,6 +116,10 @@ class PioneerAVRClient:
 
         return remove
 
+    def add_raw_listener(self, listener: Callable[[str], None]) -> Callable[[], None]:
+        """Register a listener for every raw response line (debugging)."""
+        return self._transport.add_listener(listener)
+
     async def connect(self) -> None:
         """Connect to the receiver."""
         try:
@@ -135,20 +141,19 @@ class PioneerAVRClient:
                 try:
                     parsed = parse_response(response)
                 except ProtocolError as err:
-                    raise PioneerAVRProtocolError(
-                        f"invalid {prefix} response"
-                    ) from err
+                    raise PioneerAVRProtocolError(f"invalid {prefix} response") from err
                 if parsed.kind is not expected_kind:
-                    raise PioneerAVRProtocolError(
-                        f"unexpected response to {command}"
-                    )
+                    raise PioneerAVRProtocolError(f"unexpected response to {command}")
                 self._handle_response(response)
                 power_seen |= prefix == "PWR"
-            except TransportTimeout:
+            except TransportTimeout as err:
                 if prefix == "PWR":
-                    raise PioneerAVRProtocolError(
+                    # A silent receiver usually means a dead or half-open
+                    # connection; drop it so the next attempt reconnects.
+                    await self._transport.disconnect()
+                    raise PioneerAVRConnectionError(
                         "receiver did not answer the power query"
-                    ) from None
+                    ) from err
                 _LOGGER.debug("Receiver did not answer optional %s query", prefix)
             except TransportError as err:
                 raise PioneerAVRConnectionError from err
@@ -157,8 +162,37 @@ class PioneerAVRClient:
         return self._state
 
     async def set_power(self, power: bool) -> None:
-        """Set main-zone power."""
-        await self._send("PO" if power else "PF")
+        """Set main-zone power.
+
+        Power-on wakes the receiver CPU with a bare CR first, as required by
+        the 2012 Pioneer IP/RS-232 document, and is confirmed with ``?PWR``.
+        Power-off is sent once and not confirmed: the VSX-827 may drop off the
+        network right after switching off.
+        """
+        if not power:
+            await self._send("PF")
+            return
+        for attempt in range(1, self.POWER_ON_ATTEMPTS + 1):
+            await self.connect()
+            try:
+                await self._transport.wake()
+                await asyncio.sleep(0.1)
+                await self._transport.send("PO")
+                await asyncio.sleep(self.POWER_ON_SETTLE)
+                response = await self._transport.request("?PWR", "PWR")
+            except TransportTimeout:
+                _LOGGER.debug("No power reply after power-on attempt %d", attempt)
+                await self._transport.disconnect()
+                continue
+            except TransportError as err:
+                raise PioneerAVRConnectionError from err
+            self._handle_response(response)
+            if self._state.power is True:
+                return
+            _LOGGER.debug("Receiver ignored power-on attempt %d; retrying", attempt)
+        raise PioneerAVRProtocolError(
+            f"receiver did not confirm power on after {self.POWER_ON_ATTEMPTS} attempts"
+        )
 
     async def volume_up(self) -> None:
         """Send one main-zone volume-up command without retrying it."""

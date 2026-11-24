@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+import time
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -81,6 +82,76 @@ async def _guarded_validate(client: PioneerAVRClient) -> None:
         _print_state("Restored", client)
 
 
+# The probe never raises the volume by more than this many raw half-steps
+# (2 dB) above the starting level.
+PROBE_MAX_RAISE = 4
+
+
+async def _volume(client: PioneerAVRClient) -> int | None:
+    await client.query_state()
+    return client.state.volume_raw
+
+
+async def _probe_step(
+    client: PioneerAVRClient, label: str, commands: list[str], wake: bool
+) -> int | None:
+    """Send commands, log every raw reply for two seconds, return new volume."""
+    transport = client._transport  # noqa: SLF001 - debugging tool
+    before = await _volume(client)
+    lines: list[tuple[float, str]] = []
+    start = time.monotonic()
+    remove = client.add_raw_listener(
+        lambda line: lines.append((time.monotonic() - start, line))
+    )
+    try:
+        for command in commands:
+            if wake:
+                await transport.wake()
+                await asyncio.sleep(0.1)
+            await transport.send(command)
+            await asyncio.sleep(0.1)
+        await asyncio.sleep(2)
+    finally:
+        remove()
+    after = await _volume(client)
+    replies = ", ".join(f"{t * 1000:.0f}ms {line}" for t, line in lines) or "none"
+    print(f"{label}: {before} -> {after}  (replies: {replies})")
+    return after
+
+
+async def _restore_volume(client: PioneerAVRClient, target: int) -> None:
+    for _ in range(20):
+        current = await _volume(client)
+        if current is None or current == target:
+            break
+        await client._transport.send("VD" if current > target else "VU")  # noqa: SLF001
+        await asyncio.sleep(0.5)
+
+
+async def _probe_volume(client: PioneerAVRClient) -> None:
+    """Measure how the receiver reacts to the different volume commands."""
+    original = await _volume(client)
+    if client.state.power is not True or original is None:
+        raise PioneerAVRError("switch the receiver on before probing volume")
+    if original + PROBE_MAX_RAISE > 161:
+        raise PioneerAVRError("volume too close to maximum for a safe probe")
+    print(f"Start volume raw={original} (probe raises at most +{PROBE_MAX_RAISE})")
+    try:
+        await _probe_step(client, "VU", ["VU"], wake=False)
+        await _probe_step(client, "VD", ["VD"], wake=False)
+        await _probe_step(client, "CR+VU", ["VU"], wake=True)
+        await _probe_step(client, "CR+VD", ["VD"], wake=True)
+        await _probe_step(client, "VU x3 (100 ms)", ["VU", "VU", "VU"], wake=False)
+        await _restore_volume(client, original)
+        target = original + 2
+        await _probe_step(client, f"{target:03d}VL", [f"{target:03d}VL"], wake=False)
+        await _restore_volume(client, original)
+        await _probe_step(client, f"CR+{target:03d}VL", [f"{target:03d}VL"], wake=True)
+    finally:
+        await _restore_volume(client, original)
+        print(f"Restored volume raw={await _volume(client)} (start {original})")
+
+
 async def _run(args: argparse.Namespace) -> int:
     client = PioneerAVRClient(args.host, args.port, args.timeout)
     try:
@@ -94,6 +165,8 @@ async def _run(args: argparse.Namespace) -> int:
             _print_state("State", client)
         if args.validate:
             await _guarded_validate(client)
+        if args.probe_volume:
+            await _probe_volume(client)
     except PioneerAVRError as err:
         print(f"Error: {err or type(err).__name__}", file=sys.stderr)
         return 1
@@ -119,8 +192,13 @@ def main() -> int:
         action="store_true",
         help="Run guarded state-changing checks and restore initial state",
     )
+    parser.add_argument(
+        "--probe-volume",
+        action="store_true",
+        help="Measure VU/VD/VL behaviour (max +2 dB) and restore the volume",
+    )
     args = parser.parse_args()
-    if not (args.command or args.query or args.validate):
+    if not (args.command or args.query or args.validate or args.probe_volume):
         args.query = True
     return asyncio.run(_run(args))
 
