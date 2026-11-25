@@ -7,8 +7,10 @@ from typing import Any
 
 from .const import (
     CONF_ASSUME_OFF_WHEN_UNAVAILABLE,
+    CONF_MAX_VOLUME_RAW,
     CONF_VOLUME_MAX_RAW,
     CONF_VOLUME_MIN_RAW,
+    CONF_VOLUME_STEP_DB,
     DEFAULT_ASSUME_OFF_WHEN_UNAVAILABLE,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
@@ -17,7 +19,7 @@ from .const import (
     VOLUME_MIN,
 )
 
-PLATFORMS = ["media_player"]
+PLATFORMS = ["media_player", "switch"]
 
 
 @dataclass(slots=True)
@@ -42,6 +44,8 @@ async def async_setup_entry(hass: Any, entry: Any) -> bool:
         DEFAULT_TIMEOUT,
         volume_min_raw=entry.options.get(CONF_VOLUME_MIN_RAW, VOLUME_MIN),
         volume_max_raw=entry.options.get(CONF_VOLUME_MAX_RAW, VOLUME_MAX),
+        max_volume_raw=entry.options.get(CONF_MAX_VOLUME_RAW),
+        volume_step_db=entry.options.get(CONF_VOLUME_STEP_DB, 1),
     )
     assume_off = entry.options.get(
         CONF_ASSUME_OFF_WHEN_UNAVAILABLE,

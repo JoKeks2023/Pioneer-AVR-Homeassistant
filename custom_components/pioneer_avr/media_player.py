@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from homeassistant.components.media_player import (
@@ -12,15 +12,13 @@ from homeassistant.components.media_player import (
     MediaPlayerState,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .client import PioneerAVRConnectionError, PioneerAVRError
-from .const import DOMAIN, MANUFACTURER, MODEL, SOUND_MODE_COMMANDS, SOURCE_CODES
-from .coordinator import PioneerAVRCoordinator
+from .const import DOMAIN, SOUND_MODE_COMMANDS, SOURCE_CODES
+from .coordinator import PioneerAVRCoordinator, device_info
 
 
 async def _run(command: Awaitable[None]) -> None:
@@ -70,13 +68,7 @@ class PioneerAVRMediaPlayer(
     def __init__(self, entry: ConfigEntry, coordinator: PioneerAVRCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_main"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.unique_id or entry.entry_id)},
-            manufacturer=MANUFACTURER,
-            model=MODEL,
-            name=entry.title,
-            configuration_url=f"http://{entry.data[CONF_HOST]}",
-        )
+        self._attr_device_info = device_info(entry)
 
     @property
     def state(self) -> MediaPlayerState | None:
@@ -99,8 +91,8 @@ class PioneerAVRMediaPlayer(
 
     @property
     def assumed_state(self) -> bool:
-        """Indicate when off is inferred from network disappearance."""
-        return self.coordinator.assumed_off
+        """Indicate inferred state: off after disappearance, or paused."""
+        return self.coordinator.assumed_off or self.coordinator.paused
 
     @property
     def is_volume_muted(self) -> bool | None:
@@ -127,33 +119,38 @@ class PioneerAVRMediaPlayer(
         """Return documented listening-mode command groups."""
         return list(SOUND_MODE_COMMANDS)
 
+    async def _execute(self, command: Callable[[], Awaitable[None]]) -> None:
+        """Resume a paused connection, then run the command."""
+        await self.coordinator.async_resume()
+        await _run(command())
+
     async def async_turn_on(self) -> None:
-        await _run(self.coordinator.client.set_power(True))
+        await self._execute(lambda: self.coordinator.client.set_power(True))
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self) -> None:
-        await _run(self.coordinator.client.set_power(False))
+        await self._execute(lambda: self.coordinator.client.set_power(False))
         self.coordinator.async_assume_power_off()
 
     async def async_volume_up(self) -> None:
-        await _run(self.coordinator.client.volume_up())
+        await self._execute(lambda: self.coordinator.client.volume_up())
         await self.coordinator.async_request_refresh()
 
     async def async_volume_down(self) -> None:
-        await _run(self.coordinator.client.volume_down())
+        await self._execute(lambda: self.coordinator.client.volume_down())
         await self.coordinator.async_request_refresh()
 
     async def async_set_volume_level(self, volume: float) -> None:
-        await _run(self.coordinator.client.set_volume(volume))
+        await self._execute(lambda: self.coordinator.client.set_volume(volume))
         await self.coordinator.async_request_refresh()
 
     async def async_mute_volume(self, mute: bool) -> None:
-        await _run(self.coordinator.client.set_mute(mute))
+        await self._execute(lambda: self.coordinator.client.set_mute(mute))
         await self.coordinator.async_request_refresh()
 
     async def async_select_source(self, source: str) -> None:
-        await _run(self.coordinator.client.select_input(source))
+        await self._execute(lambda: self.coordinator.client.select_input(source))
         await self.coordinator.async_request_refresh()
 
     async def async_select_sound_mode(self, sound_mode: str) -> None:
-        await _run(self.coordinator.client.set_sound_mode(sound_mode))
+        await self._execute(lambda: self.coordinator.client.set_sound_mode(sound_mode))

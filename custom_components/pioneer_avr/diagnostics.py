@@ -25,6 +25,12 @@ async def async_get_config_entry_diagnostics(
         ),
         "volume_control_mode": runtime.client.volume_control_mode,
         "volume_range_raw": runtime.client.volume_range_raw,
+        "max_volume_raw": runtime.client.max_volume_raw,
+        "paused_until": (
+            runtime.coordinator.paused_until.isoformat()
+            if runtime.coordinator.paused_until
+            else None
+        ),
         "last_update_success": runtime.coordinator.last_update_success,
         "last_error": runtime.coordinator.last_error,
         "state": {
@@ -37,7 +43,10 @@ async def async_get_config_entry_diagnostics(
             "power",
             "volume_state",
             "volume_step",
-            "volume_display_calibration",
+            "volume_set_confirmed_steps",
+            "volume_wizard",
+            "max_volume",
+            "connection_pause",
             "mute",
             "source",
             "listening_mode_groups",

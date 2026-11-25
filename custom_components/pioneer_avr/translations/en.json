@@ -37,19 +37,41 @@
     "step": {
       "init": {
         "title": "Pioneer AVR options",
-        "description": "Choose how an unreachable powered-off receiver is represented, or calibrate the displayed volume percentage.",
-        "data": {
-          "assume_off_when_unavailable": "Show as off when unreachable after power-off",
-          "calibrate_volume": "Calibrate displayed volume range"
+        "menu_options": {
+          "general": "General",
+          "volume_quiet": "Volume wizard"
         }
       },
-      "calibration_min": {
-        "title": "Set the quiet display endpoint",
-        "description": "Use the receiver's physical volume control to select the level that should be displayed as 0%, then select Submit. The integration only reads the current volume and will not change it."
+      "general": {
+        "title": "General",
+        "description": "Choose how an unreachable powered-off receiver is represented and how long the control connection can be released.",
+        "data": {
+          "assume_off_when_unavailable": "Show as off when unreachable after power-off",
+          "pause_minutes": "Pause length of the control connection"
+        },
+        "data_description": {
+          "pause_minutes": "How long the \"Control connection\" switch releases the receiver so Pioneer ControlApp can connect."
+        }
       },
-      "calibration_max": {
-        "title": "Set the loud display endpoint",
-        "description": "The 0% endpoint was recorded as raw value {minimum}. Now select the level that should be displayed as 100% using the receiver's physical control, then select Submit. The integration only reads the current volume."
+      "volume_quiet": {
+        "title": "Volume wizard (1/3): quietest level",
+        "description": "Use the remote or the volume knob to set the **quietest** level you actually use. It becomes 0 % on the slider.\n\nCurrent receiver volume: **{current}**\n\nSelect Submit when ready. The wizard only reads the volume and never changes it."
+      },
+      "volume_loud": {
+        "title": "Volume wizard (2/3): loudest level",
+        "description": "Quietest level saved: **{quiet}**.\n\nNow set the **loudest** level Home Assistant should use. It becomes 100 % on the slider.\n\nCurrent receiver volume: **{current}**\n\nTurn the volume down again afterwards if needed, then select Submit."
+      },
+      "volume_limits": {
+        "title": "Volume wizard (3/3): limits",
+        "description": "Slider range: **{quiet}** (0 %) to **{loud}** (100 %).\n\nThe maximum volume is a hard limit for the slider and volume up. It is preselected with your loudest level.",
+        "data": {
+          "max_volume_raw": "Maximum volume",
+          "volume_step_db": "Step size for volume up/down"
+        },
+        "data_description": {
+          "max_volume_raw": "Home Assistant never raises the volume above this level.",
+          "volume_step_db": "How far one volume up/down press moves the receiver."
+        }
       }
     },
     "error": {
@@ -66,6 +88,98 @@
     },
     "command_failed": {
       "message": "The receiver did not carry out the command: {error}"
+    }
+  },
+  "selector": {
+    "max_volume": {
+      "options": {
+        "none": "No limit",
+        "raw_161": "0 dB",
+        "raw_159": "-1 dB",
+        "raw_157": "-2 dB",
+        "raw_155": "-3 dB",
+        "raw_153": "-4 dB",
+        "raw_151": "-5 dB",
+        "raw_149": "-6 dB",
+        "raw_147": "-7 dB",
+        "raw_145": "-8 dB",
+        "raw_143": "-9 dB",
+        "raw_141": "-10 dB",
+        "raw_139": "-11 dB",
+        "raw_137": "-12 dB",
+        "raw_135": "-13 dB",
+        "raw_133": "-14 dB",
+        "raw_131": "-15 dB",
+        "raw_129": "-16 dB",
+        "raw_127": "-17 dB",
+        "raw_125": "-18 dB",
+        "raw_123": "-19 dB",
+        "raw_121": "-20 dB",
+        "raw_119": "-21 dB",
+        "raw_117": "-22 dB",
+        "raw_115": "-23 dB",
+        "raw_113": "-24 dB",
+        "raw_111": "-25 dB",
+        "raw_109": "-26 dB",
+        "raw_107": "-27 dB",
+        "raw_105": "-28 dB",
+        "raw_103": "-29 dB",
+        "raw_101": "-30 dB",
+        "raw_99": "-31 dB",
+        "raw_97": "-32 dB",
+        "raw_95": "-33 dB",
+        "raw_93": "-34 dB",
+        "raw_91": "-35 dB",
+        "raw_89": "-36 dB",
+        "raw_87": "-37 dB",
+        "raw_85": "-38 dB",
+        "raw_83": "-39 dB",
+        "raw_81": "-40 dB",
+        "raw_79": "-41 dB",
+        "raw_77": "-42 dB",
+        "raw_75": "-43 dB",
+        "raw_73": "-44 dB",
+        "raw_71": "-45 dB",
+        "raw_69": "-46 dB",
+        "raw_67": "-47 dB",
+        "raw_65": "-48 dB",
+        "raw_63": "-49 dB",
+        "raw_61": "-50 dB",
+        "raw_59": "-51 dB",
+        "raw_57": "-52 dB",
+        "raw_55": "-53 dB",
+        "raw_53": "-54 dB",
+        "raw_51": "-55 dB",
+        "raw_49": "-56 dB",
+        "raw_47": "-57 dB",
+        "raw_45": "-58 dB",
+        "raw_43": "-59 dB",
+        "raw_41": "-60 dB"
+      }
+    },
+    "pause_minutes": {
+      "options": {
+        "5": "5 minutes",
+        "10": "10 minutes",
+        "15": "15 minutes",
+        "30": "30 minutes",
+        "60": "60 minutes"
+      }
+    },
+    "volume_step_db": {
+      "options": {
+        "1": "1 dB",
+        "2": "2 dB",
+        "3": "3 dB",
+        "5": "5 dB"
+      }
+    }
+  },
+  "entity": {
+    "switch": {
+      "control_connection": {
+        "name": "Control connection"
+      }
     }
   }
 }

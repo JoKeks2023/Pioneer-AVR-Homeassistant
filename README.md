@@ -50,8 +50,10 @@ automatic SSDP discovery, a UI config flow, immediate TCP state updates, and a
 | --- | :---: | --- |
 | Power on and off | ✅ | Powered-off receivers can remain represented as `off` |
 | Volume display | ✅ | Normalized to Home Assistant's `0.0–1.0` range |
-| Volume up and down | ✅ | Native `VU` / `VD` commands, 1 dB per step |
+| Volume up and down | ✅ | Native `VU` / `VD` commands, 1–5 dB per press (configurable) |
 | Volume slider / exact volume | ✅ | Reached with confirmed 1 dB steps; at most +10 dB per change |
+| Volume wizard and maximum volume | ✅ | Guided slider range, hard volume limit |
+| Release connection for ControlApp | ✅ | **Control connection** switch, automatic reconnect |
 | Mute and unmute | ✅ | State is queried and confirmed |
 | Current input | ✅ | Receiver-reported source |
 | Input selection | ✅ | Confirmed Pioneer source codes |
@@ -122,11 +124,12 @@ restart Home Assistant.
 The setup flow opens a local TCP connection and requires a valid Pioneer power
 response before it creates the config entry. YAML configuration is not used.
 
-## Receiver options and volume-display calibration
+## Receiver options and volume wizard
 
-Open **Settings → Devices & services → Pioneer AVR → Configure**.
+Open **Settings → Devices & services → Pioneer AVR → Configure**. The menu
+offers **General** and **Volume wizard**.
 
-### Preserve the powered-off state
+### General: preserve the powered-off state
 
 Keep **Show as off when unreachable after power-off** enabled if the VSX-827
 shuts down its network interface. After Home Assistant successfully sends the
@@ -139,22 +142,26 @@ option also allows the existing entity to load as an assumed `off` receiver.
 Disable the option if every unreachable state should instead be treated as a
 setup failure.
 
-### Two-point volume-display calibration
+### General: pause length of the control connection
 
-Pioneer reports volume in raw half-steps, while Home Assistant requires a
-normalized `0–100 %` value. Calibration maps the displayed percentage to the
-part of the receiver's range that is actually useful for your room:
+The VSX-827 accepts only one control connection. The **Control connection**
+switch on the device releases it so Pioneer ControlApp can connect; Home
+Assistant reconnects automatically after the selected time (5–60 minutes,
+default 10) or as soon as you switch it back on or use the receiver from Home
+Assistant. While paused, the media player keeps its last state as assumed.
 
-1. Enable **Calibrate displayed volume range** and submit the options form.
-2. Set the receiver manually to the level that should display as `0 %`, then
-   submit the first calibration step.
-3. Set the receiver manually to the level that should display as `100 %`,
-   then submit the second step.
-4. The integration reloads and maps the captured endpoints to `0 %` and `100 %`.
+### Volume wizard
 
-The assistant only sends state queries during calibration. It never changes
-the volume itself. Calibration defines which receiver levels the volume slider's
-`0 %` and `100 %` correspond to.
+1. **Quietest level:** set the receiver to the quietest level you use (remote
+   or knob). It becomes `0 %` on the slider. The current level is shown in dB.
+2. **Loudest level:** set the loudest level Home Assistant should use. It
+   becomes `100 %` on the slider.
+3. **Limits:** choose the **maximum volume** (preselected with the loudest
+   level, or *No limit*) and the **step size** for volume up/down (1, 2, 3 or
+   5 dB).
+
+The wizard only reads the volume; it never changes it. The maximum volume is a
+hard limit: the slider and volume up never go above it.
 
 ## How it works
 
@@ -226,7 +233,7 @@ all receiver controls work normally.
 | Connection fails while off | Enable Network Standby for power-on, or enable the preserved `off` option |
 | Port `8102` refuses connections | The receiver accepts only one connection: close Pioneer ControlApp, or disable the integration while using other tools |
 | Power-on fails but other controls work while on | Network Standby is disabled or the network interface sleeps |
-| Home Assistant volume percentage feels wrong | Calibrate the displayed range under **Configure**; this affects display only |
+| Home Assistant volume percentage feels wrong | Run the **Volume wizard** under **Configure** |
 | Volume slider stops short of a high target | Intended: one change raises the volume by at most 10 dB; move it again |
 | Sound-mode field has no active value | Expected: the VSX-827 does not report the current mode over TCP |
 | An input is shown but cannot be selected | AirPlay and DMR are reportable but not selectable through `FN` |
@@ -329,9 +336,14 @@ second simultaneous TCP connection.
 
 ```bash
 pytest
+pip install pytest-homeassistant-custom-component && pytest tests_ha
 ruff check .
 python3 -m compileall custom_components scripts tests
 ```
+
+`tests/` runs without Home Assistant; `tests_ha/` loads the integration into a
+real Home Assistant test instance (setup, connection pause, maximum volume,
+step size, volume wizard).
 
 The automated suite uses a local fake receiver and covers command encoding,
 fragmented and unsolicited replies, malformed responses, timeouts, serialized
