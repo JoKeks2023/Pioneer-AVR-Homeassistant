@@ -5,11 +5,18 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import socket
 from collections.abc import Callable
 
 from .protocol import encode_command
 
 _LOGGER = logging.getLogger(__name__)
+
+# Detect a silently vanished receiver (network interface asleep, router
+# reboot) within about a minute instead of the OS default of many minutes.
+KEEPALIVE_IDLE = 30
+KEEPALIVE_INTERVAL = 10
+KEEPALIVE_COUNT = 3
 
 
 class TransportError(ConnectionError):
@@ -37,7 +44,12 @@ class PioneerTCPTransport:
     @property
     def connected(self) -> bool:
         """Return whether the connection is open."""
-        return self._writer is not None and not self._writer.is_closing()
+        return (
+            self._writer is not None
+            and not self._writer.is_closing()
+            and self._listener_task is not None
+            and not self._listener_task.done()
+        )
 
     def add_listener(self, listener: Callable[[str], None]) -> Callable[[], None]:
         """Register a raw response listener."""
@@ -57,8 +69,15 @@ class PioneerTCPTransport:
             self._reader, self._writer = await asyncio.wait_for(
                 asyncio.open_connection(self.host, self.port), self.timeout
             )
+        except ConnectionRefusedError as err:
+            raise TransportError(
+                f"{self.host}:{self.port} refused the connection; the receiver "
+                "accepts only one control connection, so another client (e.g. "
+                "Pioneer ControlApp) may be connected"
+            ) from err
         except (OSError, TimeoutError) as err:
             raise TransportError(f"cannot connect to {self.host}:{self.port}") from err
+        _enable_keepalive(self._writer.get_extra_info("socket"))
         self._listener_task = asyncio.create_task(
             self._listen(), name="pioneer_avr_listener"
         )
@@ -80,12 +99,19 @@ class PioneerTCPTransport:
                 await writer.wait_closed()
         self._fail_pending(TransportError("transport disconnected"))
 
+    async def wake(self) -> None:
+        """Send a bare CR so a receiver in standby accepts the next command."""
+        await self._write(b"\r")
+
     async def send(self, command: str) -> None:
         """Send a command without waiting for a particular response."""
+        await self._write(encode_command(command))
+
+    async def _write(self, payload: bytes) -> None:
         async with self._command_lock:
             await self._ensure_connected()
             assert self._writer is not None
-            self._writer.write(encode_command(command))
+            self._writer.write(payload)
             try:
                 await asyncio.wait_for(self._writer.drain(), self.timeout)
             except (OSError, TimeoutError) as err:
@@ -139,8 +165,11 @@ class PioneerTCPTransport:
         except (OSError, asyncio.IncompleteReadError) as err:
             _LOGGER.debug("Pioneer listener stopped: %s", err)
             self._fail_pending(TransportError("receiver closed the connection"))
+            writer = self._writer
             self._reader = None
             self._writer = None
+            if writer is not None:
+                writer.close()
 
     def _fail_pending(self, error: Exception) -> None:
         if self._pending is None:
@@ -149,3 +178,24 @@ class PioneerTCPTransport:
         self._pending = None
         if not future.done():
             future.set_exception(error)
+
+
+def _enable_keepalive(sock: socket.socket | None) -> None:
+    """Enable TCP keepalive with short probes where the platform allows it."""
+    if sock is None:
+        return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        # Linux names the idle option TCP_KEEPIDLE, macOS TCP_KEEPALIVE.
+        idle = getattr(socket, "TCP_KEEPIDLE", None) or getattr(
+            socket, "TCP_KEEPALIVE", None
+        )
+        for option, value in (
+            (idle, KEEPALIVE_IDLE),
+            (getattr(socket, "TCP_KEEPINTVL", None), KEEPALIVE_INTERVAL),
+            (getattr(socket, "TCP_KEEPCNT", None), KEEPALIVE_COUNT),
+        ):
+            if option is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, option, value)
+    except OSError as err:
+        _LOGGER.debug("Could not enable TCP keepalive: %s", err)

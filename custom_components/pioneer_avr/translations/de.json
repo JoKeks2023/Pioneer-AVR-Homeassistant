@@ -37,7 +37,7 @@
     "step": {
       "init": {
         "title": "Pioneer-AVR-Optionen",
-        "description": "Lege fest, wie ein ausgeschalteter und nicht erreichbarer Receiver angezeigt wird, oder kalibriere die angezeigte Lautstärke. Die Kalibrierung ermöglicht keine exakte Ziel-Lautstärke.",
+        "description": "Lege fest, wie ein ausgeschalteter und nicht erreichbarer Receiver angezeigt wird, oder kalibriere die angezeigte Lautstärke.",
         "data": {
           "assume_off_when_unavailable": "Bei Nichterreichbarkeit nach dem Ausschalten als aus anzeigen",
           "calibrate_volume": "Angezeigten Lautstärkebereich kalibrieren"
@@ -58,6 +58,14 @@
       "invalid_volume_range": "Der laute Endpunkt muss höher als der leise Endpunkt sein.",
       "unknown": "Unerwarteter Fehler. Bitte die Home-Assistant-Protokolle prüfen.",
       "volume_not_reported": "Der Receiver hat seine aktuelle Lautstärke nicht gemeldet."
+    }
+  },
+  "exceptions": {
+    "cannot_connect": {
+      "message": "Receiver nicht erreichbar: {error}"
+    },
+    "command_failed": {
+      "message": "Der Receiver hat den Befehl nicht ausgeführt: {error}"
     }
   }
 }

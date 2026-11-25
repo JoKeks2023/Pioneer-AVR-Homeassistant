@@ -37,7 +37,7 @@
     "step": {
       "init": {
         "title": "Pioneer AVR options",
-        "description": "Choose how an unreachable powered-off receiver is represented, or calibrate the displayed volume percentage. Calibration does not enable exact volume selection.",
+        "description": "Choose how an unreachable powered-off receiver is represented, or calibrate the displayed volume percentage.",
         "data": {
           "assume_off_when_unavailable": "Show as off when unreachable after power-off",
           "calibrate_volume": "Calibrate displayed volume range"
@@ -58,6 +58,14 @@
       "invalid_volume_range": "The loud endpoint must be higher than the quiet endpoint.",
       "unknown": "Unexpected error. Check the Home Assistant logs.",
       "volume_not_reported": "The receiver did not report its current volume."
+    }
+  },
+  "exceptions": {
+    "cannot_connect": {
+      "message": "Could not reach the receiver: {error}"
+    },
+    "command_failed": {
+      "message": "The receiver did not carry out the command: {error}"
     }
   }
 }

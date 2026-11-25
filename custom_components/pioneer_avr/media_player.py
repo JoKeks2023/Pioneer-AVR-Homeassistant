@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from typing import Any
 
 from homeassistant.components.media_player import (
@@ -12,12 +13,31 @@ from homeassistant.components.media_player import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .client import PioneerAVRConnectionError, PioneerAVRError
 from .const import DOMAIN, MANUFACTURER, MODEL, SOUND_MODE_COMMANDS, SOURCE_CODES
 from .coordinator import PioneerAVRCoordinator
+
+
+async def _run(command: Awaitable[None]) -> None:
+    """Run a client command and report failures as Home Assistant errors."""
+    try:
+        await command
+    except PioneerAVRError as err:
+        key = (
+            "cannot_connect"
+            if isinstance(err, PioneerAVRConnectionError)
+            else "command_failed"
+        )
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key=key,
+            translation_placeholders={"error": str(err) or type(err).__name__},
+        ) from err
 
 
 async def async_setup_entry(
@@ -41,6 +61,7 @@ class PioneerAVRMediaPlayer(
         MediaPlayerEntityFeature.TURN_ON
         | MediaPlayerEntityFeature.TURN_OFF
         | MediaPlayerEntityFeature.VOLUME_STEP
+        | MediaPlayerEntityFeature.VOLUME_SET
         | MediaPlayerEntityFeature.VOLUME_MUTE
         | MediaPlayerEntityFeature.SELECT_SOURCE
         | MediaPlayerEntityFeature.SELECT_SOUND_MODE
@@ -63,9 +84,7 @@ class PioneerAVRMediaPlayer(
         if self.coordinator.data.power is None:
             return None
         return (
-            MediaPlayerState.ON
-            if self.coordinator.data.power
-            else MediaPlayerState.OFF
+            MediaPlayerState.ON if self.coordinator.data.power else MediaPlayerState.OFF
         )
 
     @property
@@ -109,28 +128,32 @@ class PioneerAVRMediaPlayer(
         return list(SOUND_MODE_COMMANDS)
 
     async def async_turn_on(self) -> None:
-        await self.coordinator.client.set_power(True)
+        await _run(self.coordinator.client.set_power(True))
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self) -> None:
-        await self.coordinator.client.set_power(False)
+        await _run(self.coordinator.client.set_power(False))
         self.coordinator.async_assume_power_off()
 
     async def async_volume_up(self) -> None:
-        await self.coordinator.client.volume_up()
+        await _run(self.coordinator.client.volume_up())
         await self.coordinator.async_request_refresh()
 
     async def async_volume_down(self) -> None:
-        await self.coordinator.client.volume_down()
+        await _run(self.coordinator.client.volume_down())
+        await self.coordinator.async_request_refresh()
+
+    async def async_set_volume_level(self, volume: float) -> None:
+        await _run(self.coordinator.client.set_volume(volume))
         await self.coordinator.async_request_refresh()
 
     async def async_mute_volume(self, mute: bool) -> None:
-        await self.coordinator.client.set_mute(mute)
+        await _run(self.coordinator.client.set_mute(mute))
         await self.coordinator.async_request_refresh()
 
     async def async_select_source(self, source: str) -> None:
-        await self.coordinator.client.select_input(source)
+        await _run(self.coordinator.client.select_input(source))
         await self.coordinator.async_request_refresh()
 
     async def async_select_sound_mode(self, sound_mode: str) -> None:
-        await self.coordinator.client.set_sound_mode(sound_mode)
+        await _run(self.coordinator.client.set_sound_mode(sound_mode))

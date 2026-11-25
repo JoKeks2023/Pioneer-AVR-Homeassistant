@@ -50,7 +50,7 @@ class PioneerAVRCoordinator(DataUpdateCoordinator[ReceiverState]):
             state = await self.client.query_state()
         except (PioneerAVRConnectionError, PioneerAVRProtocolError) as err:
             self.last_error = type(err).__name__
-            raise UpdateFailed("Unable to update Pioneer AVR") from err
+            raise UpdateFailed(f"Unable to update Pioneer AVR: {err}") from err
         self.last_error = None
         self.assumed_off = False
         return state

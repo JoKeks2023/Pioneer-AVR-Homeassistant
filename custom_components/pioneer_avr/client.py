@@ -49,6 +49,15 @@ class PioneerAVRClient:
         ("?FN", "FN", ResponseKind.SOURCE),
     )
     ACTION_ATTEMPTS = 4
+    POWER_ON_ATTEMPTS = 3
+    # Hardware probe 2026-11-25: one VU/VD moves the VSX-827 by exactly two raw
+    # half-steps (1 dB). Steps sent 100 ms apart (see _send) are all applied.
+    VOLUME_STEP_RAW = 2
+    VOLUME_SETTLE = 0.6
+    VOLUME_SET_ROUNDS = 3
+    # Never raise the volume by more than 10 dB in one set_volume call.
+    VOLUME_MAX_RAISE_STEPS = 10
+    POWER_ON_SETTLE = 1.5
 
     def __init__(
         self,
@@ -67,6 +76,8 @@ class PioneerAVRClient:
         self._listeners: list[Callable[[ReceiverState], None]] = []
         self._volume_min_raw = volume_min_raw
         self._volume_max_raw = volume_max_raw
+        self._volume_lock = asyncio.Lock()
+        self._volume_target: float | None = None
 
     @property
     def connected(self) -> bool:
@@ -85,8 +96,8 @@ class PioneerAVRClient:
 
     @property
     def volume_control_mode(self) -> str:
-        """Return the verified volume control mode."""
-        return "step_only"
+        """Return how exact volume is implemented."""
+        return "confirmed_steps"
 
     @property
     def volume_range_raw(self) -> tuple[int, int]:
@@ -114,12 +125,16 @@ class PioneerAVRClient:
 
         return remove
 
+    def add_raw_listener(self, listener: Callable[[str], None]) -> Callable[[], None]:
+        """Register a listener for every raw response line (debugging)."""
+        return self._transport.add_listener(listener)
+
     async def connect(self) -> None:
         """Connect to the receiver."""
         try:
             await self._transport.connect()
         except TransportError as err:
-            raise PioneerAVRConnectionError from err
+            raise PioneerAVRConnectionError(str(err)) from err
 
     async def disconnect(self) -> None:
         """Disconnect from the receiver."""
@@ -135,30 +150,58 @@ class PioneerAVRClient:
                 try:
                     parsed = parse_response(response)
                 except ProtocolError as err:
-                    raise PioneerAVRProtocolError(
-                        f"invalid {prefix} response"
-                    ) from err
+                    raise PioneerAVRProtocolError(f"invalid {prefix} response") from err
                 if parsed.kind is not expected_kind:
-                    raise PioneerAVRProtocolError(
-                        f"unexpected response to {command}"
-                    )
+                    raise PioneerAVRProtocolError(f"unexpected response to {command}")
                 self._handle_response(response)
                 power_seen |= prefix == "PWR"
-            except TransportTimeout:
+            except TransportTimeout as err:
                 if prefix == "PWR":
-                    raise PioneerAVRProtocolError(
+                    # A silent receiver usually means a dead or half-open
+                    # connection; drop it so the next attempt reconnects.
+                    await self._transport.disconnect()
+                    raise PioneerAVRConnectionError(
                         "receiver did not answer the power query"
-                    ) from None
+                    ) from err
                 _LOGGER.debug("Receiver did not answer optional %s query", prefix)
             except TransportError as err:
-                raise PioneerAVRConnectionError from err
+                raise PioneerAVRConnectionError(str(err)) from err
         if not power_seen:
             raise PioneerAVRProtocolError("no Pioneer power response received")
         return self._state
 
     async def set_power(self, power: bool) -> None:
-        """Set main-zone power."""
-        await self._send("PO" if power else "PF")
+        """Set main-zone power.
+
+        Power-on wakes the receiver CPU with a bare CR first, as required by
+        the 2012 Pioneer IP/RS-232 document, and is confirmed with ``?PWR``.
+        Power-off is sent once and not confirmed: the VSX-827 may drop off the
+        network right after switching off.
+        """
+        if not power:
+            await self._send("PF")
+            return
+        for attempt in range(1, self.POWER_ON_ATTEMPTS + 1):
+            await self.connect()
+            try:
+                await self._transport.wake()
+                await asyncio.sleep(0.1)
+                await self._transport.send("PO")
+                await asyncio.sleep(self.POWER_ON_SETTLE)
+                response = await self._transport.request("?PWR", "PWR")
+            except TransportTimeout:
+                _LOGGER.debug("No power reply after power-on attempt %d", attempt)
+                await self._transport.disconnect()
+                continue
+            except TransportError as err:
+                raise PioneerAVRConnectionError(str(err)) from err
+            self._handle_response(response)
+            if self._state.power is True:
+                return
+            _LOGGER.debug("Receiver ignored power-on attempt %d; retrying", attempt)
+        raise PioneerAVRProtocolError(
+            f"receiver did not confirm power on after {self.POWER_ON_ATTEMPTS} attempts"
+        )
 
     async def volume_up(self) -> None:
         """Send one main-zone volume-up command without retrying it."""
@@ -167,6 +210,55 @@ class PioneerAVRClient:
     async def volume_down(self) -> None:
         """Send one main-zone volume-down command without retrying it."""
         await self._send("VD")
+
+    async def set_volume(self, level: float) -> None:
+        """Move to a calibrated volume level with confirmed 1 dB steps.
+
+        The VSX-827 ignores ``nnnVL``, so the target is reached with VU/VD.
+        Each round re-reads the actual volume before stepping, so a step is
+        never blindly repeated. While a move is running, a newer target
+        replaces the old one instead of queueing another move.
+        """
+        self._volume_target = min(1.0, max(0.0, level))
+        if self._volume_lock.locked():
+            return
+        async with self._volume_lock:
+            ceiling: int | None = None
+            for _ in range(self.VOLUME_SET_ROUNDS):
+                current = await self._query_volume()
+                if ceiling is None:
+                    ceiling = (
+                        current + self.VOLUME_MAX_RAISE_STEPS * self.VOLUME_STEP_RAW
+                    )
+                target = self._target_raw(self._volume_target)
+                target = min(target, ceiling)
+                steps = round((target - current) / self.VOLUME_STEP_RAW)
+                if steps == 0:
+                    return
+                command = "VU" if steps > 0 else "VD"
+                for _ in range(abs(steps)):
+                    await self._send(command)
+                await asyncio.sleep(self.VOLUME_SETTLE)
+            _LOGGER.debug(
+                "Volume target not reached after %d rounds", self.VOLUME_SET_ROUNDS
+            )
+
+    def _target_raw(self, level: float) -> int:
+        span = self._volume_max_raw - self._volume_min_raw
+        return round(self._volume_min_raw + level * span)
+
+    async def _query_volume(self) -> int:
+        await self.connect()
+        try:
+            response = await self._transport.request("?VOL", "VOL")
+        except TransportError as err:
+            raise PioneerAVRConnectionError(str(err)) from err
+        self._handle_response(response)
+        if self._state.power is False:
+            raise PioneerAVRProtocolError("receiver is off")
+        if self._state.volume_raw is None:
+            raise PioneerAVRProtocolError("receiver did not report its volume")
+        return self._state.volume_raw
 
     async def set_mute(self, muted: bool) -> None:
         """Set main-zone mute."""
@@ -207,7 +299,7 @@ class PioneerAVRClient:
         try:
             return await self._transport.request(command, expected_prefix)
         except TransportError as err:
-            raise PioneerAVRConnectionError from err
+            raise PioneerAVRConnectionError(str(err)) from err
 
     async def _send(self, command: str) -> None:
         await self.connect()
@@ -216,7 +308,7 @@ class PioneerAVRClient:
             # Pioneer specifies a 100 ms inter-command delay for the 2012 API.
             await asyncio.sleep(0.1)
         except TransportError as err:
-            raise PioneerAVRConnectionError from err
+            raise PioneerAVRConnectionError(str(err)) from err
 
     async def _send_and_confirm(
         self,
