@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
@@ -37,11 +38,13 @@ from .const import (
     DEFAULT_TIMEOUT,
     DEFAULT_VOLUME_STEP_DB,
     DOMAIN,
-    MAX_VOLUME_DB_CHOICES,
     MAX_VOLUME_NONE,
     PAUSE_MINUTES_CHOICES,
     VOLUME_STEP_DB_CHOICES,
     db_to_raw,
+    max_volume_option,
+    max_volume_options,
+    parse_max_volume_option,
     raw_to_db,
 )
 
@@ -355,24 +358,23 @@ class PioneerAVROptionsFlow(config_entries.OptionsFlow):
                     **options,
                     CONF_VOLUME_MIN_RAW: self._quiet_raw,
                     CONF_VOLUME_MAX_RAW: self._loud_raw,
-                    CONF_MAX_VOLUME_RAW: (
-                        None
-                        if max_volume == MAX_VOLUME_NONE
-                        else db_to_raw(int(max_volume))
-                    ),
+                    CONF_MAX_VOLUME_RAW: parse_max_volume_option(max_volume),
                     CONF_VOLUME_STEP_DB: int(user_input[CONF_VOLUME_STEP_DB]),
                 }
             )
-        loud_db = int(raw_to_db(self._loud_raw))
-        max_options = [str(db) for db in reversed(MAX_VOLUME_DB_CHOICES)]
+        # Preselect the loudest level, rounded down to a whole dB.
+        loud_option = max_volume_option(
+            db_to_raw(math.floor(raw_to_db(self._loud_raw)))
+        )
+        max_options = max_volume_options()
         return self.async_show_form(
             step_id="volume_limits",
             data_schema=vol.Schema(
                 {
                     vol.Required(
                         CONF_MAX_VOLUME_RAW,
-                        default=str(loud_db)
-                        if str(loud_db) in max_options
+                        default=loud_option
+                        if loud_option in max_options
                         else MAX_VOLUME_NONE,
                     ): _dropdown([MAX_VOLUME_NONE, *max_options], "max_volume"),
                     vol.Required(

@@ -47,6 +47,23 @@ def db_to_raw(db: float) -> int:
     return round(VOLUME_MAX + db * 2)
 
 
+def max_volume_option(raw: int) -> str:
+    """Selector key for a maximum volume (translation keys cannot start with -)."""
+    return f"raw_{raw}"
+
+
+def max_volume_options() -> list[str]:
+    """Selector keys from 0 dB down to -60 dB in 1 dB steps."""
+    return [max_volume_option(db_to_raw(db)) for db in reversed(MAX_VOLUME_DB_CHOICES)]
+
+
+def parse_max_volume_option(value: str) -> int | None:
+    """Return the raw maximum volume for a selector key, or None for no limit."""
+    if value == MAX_VOLUME_NONE:
+        return None
+    return int(value.removeprefix("raw_"))
+
+
 # Source codes documented for the VSX-1022/VSX-822 2012 protocol family and
 # observed by existing VSX-827 users. A receiver may report only a subset.
 SOURCES: dict[str, str] = {

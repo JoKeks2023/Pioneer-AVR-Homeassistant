@@ -134,10 +134,10 @@ async def test_volume_wizard(hass: HomeAssistant, receiver, make_entry) -> None:
     assert result["step_id"] == "volume_limits"
     schema = result["data_schema"].schema
     defaults = {str(key): key.default() for key in schema}
-    assert defaults[CONF_MAX_VOLUME_RAW] == "-30"
+    assert defaults[CONF_MAX_VOLUME_RAW] == "raw_101"  # -30 dB
 
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {CONF_MAX_VOLUME_RAW: "-30", CONF_VOLUME_STEP_DB: "2"}
+        result["flow_id"], {CONF_MAX_VOLUME_RAW: "raw_101", CONF_VOLUME_STEP_DB: "2"}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
