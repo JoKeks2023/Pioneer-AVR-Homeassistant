@@ -125,7 +125,7 @@ class PioneerAVRClient:
         try:
             await self._transport.connect()
         except TransportError as err:
-            raise PioneerAVRConnectionError from err
+            raise PioneerAVRConnectionError(str(err)) from err
 
     async def disconnect(self) -> None:
         """Disconnect from the receiver."""
@@ -156,7 +156,7 @@ class PioneerAVRClient:
                     ) from err
                 _LOGGER.debug("Receiver did not answer optional %s query", prefix)
             except TransportError as err:
-                raise PioneerAVRConnectionError from err
+                raise PioneerAVRConnectionError(str(err)) from err
         if not power_seen:
             raise PioneerAVRProtocolError("no Pioneer power response received")
         return self._state
@@ -185,7 +185,7 @@ class PioneerAVRClient:
                 await self._transport.disconnect()
                 continue
             except TransportError as err:
-                raise PioneerAVRConnectionError from err
+                raise PioneerAVRConnectionError(str(err)) from err
             self._handle_response(response)
             if self._state.power is True:
                 return
@@ -241,7 +241,7 @@ class PioneerAVRClient:
         try:
             return await self._transport.request(command, expected_prefix)
         except TransportError as err:
-            raise PioneerAVRConnectionError from err
+            raise PioneerAVRConnectionError(str(err)) from err
 
     async def _send(self, command: str) -> None:
         await self.connect()
@@ -250,7 +250,7 @@ class PioneerAVRClient:
             # Pioneer specifies a 100 ms inter-command delay for the 2012 API.
             await asyncio.sleep(0.1)
         except TransportError as err:
-            raise PioneerAVRConnectionError from err
+            raise PioneerAVRConnectionError(str(err)) from err
 
     async def _send_and_confirm(
         self,

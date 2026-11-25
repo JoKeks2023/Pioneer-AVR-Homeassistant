@@ -82,9 +82,9 @@ async def _guarded_validate(client: PioneerAVRClient) -> None:
         _print_state("Restored", client)
 
 
-# The probe never raises the volume by more than this many raw half-steps
-# (2 dB) above the starting level.
-PROBE_MAX_RAISE = 4
+# The probe never raises the volume by more than this many raw half-steps;
+# one VU on the VSX-827 is two half-steps (1 dB), VU x3 reaches +6 (3 dB).
+PROBE_MAX_RAISE = 6
 
 
 async def _volume(client: PioneerAVRClient) -> int | None:
@@ -168,7 +168,7 @@ async def _run(args: argparse.Namespace) -> int:
         if args.probe_volume:
             await _probe_volume(client)
     except PioneerAVRError as err:
-        print(f"Error: {err or type(err).__name__}", file=sys.stderr)
+        print(f"Error: {type(err).__name__}: {err}", file=sys.stderr)
         return 1
     finally:
         await client.disconnect()
@@ -195,7 +195,7 @@ def main() -> int:
     parser.add_argument(
         "--probe-volume",
         action="store_true",
-        help="Measure VU/VD/VL behaviour (max +2 dB) and restore the volume",
+        help="Measure VU/VD/VL behaviour (max +3 dB) and restore the volume",
     )
     args = parser.parse_args()
     if not (args.command or args.query or args.validate or args.probe_volume):
