@@ -37,19 +37,41 @@
     "step": {
       "init": {
         "title": "Pioneer-AVR-Optionen",
-        "description": "Lege fest, wie ein ausgeschalteter und nicht erreichbarer Receiver angezeigt wird, oder kalibriere die angezeigte Lautstärke.",
-        "data": {
-          "assume_off_when_unavailable": "Bei Nichterreichbarkeit nach dem Ausschalten als aus anzeigen",
-          "calibrate_volume": "Angezeigten Lautstärkebereich kalibrieren"
+        "menu_options": {
+          "general": "Allgemein",
+          "volume_quiet": "Lautstärke-Assistent"
         }
       },
-      "calibration_min": {
-        "title": "Leisen Anzeige-Endpunkt festlegen",
-        "description": "Stelle am Receiver die Lautstärke ein, die als 0 % angezeigt werden soll, und wähle dann Senden. Die Integration liest den Wert nur aus und verändert die Lautstärke nicht."
+      "general": {
+        "title": "Allgemein",
+        "description": "Lege fest, wie ein ausgeschalteter und nicht erreichbarer Receiver angezeigt wird und wie lange die Steuerverbindung freigegeben werden kann.",
+        "data": {
+          "assume_off_when_unavailable": "Nach dem Ausschalten bei fehlender Erreichbarkeit als aus anzeigen",
+          "pause_minutes": "Pausendauer der Steuerverbindung"
+        },
+        "data_description": {
+          "pause_minutes": "So lange gibt der Schalter „Steuerverbindung“ den Receiver frei, damit sich die Pioneer ControlApp verbinden kann."
+        }
       },
-      "calibration_max": {
-        "title": "Lauten Anzeige-Endpunkt festlegen",
-        "description": "Der 0-%-Endpunkt wurde als Rohwert {minimum} gespeichert. Stelle nun am Receiver die Lautstärke ein, die als 100 % angezeigt werden soll, und wähle dann Senden. Die Integration liest den Wert nur aus."
+      "volume_quiet": {
+        "title": "Lautstärke-Assistent (1/3): leiseste Stufe",
+        "description": "Stelle mit der Fernbedienung oder am Drehregler die **leiseste** Lautstärke ein, die du wirklich nutzt. Sie wird 0 % im Regler.\n\nAktuelle Lautstärke am Receiver: **{current}**\n\nWenn alles passt, auf Absenden klicken. Der Assistent liest die Lautstärke nur und verändert sie nie."
+      },
+      "volume_loud": {
+        "title": "Lautstärke-Assistent (2/3): lauteste Stufe",
+        "description": "Leiseste Stufe gespeichert: **{quiet}**.\n\nStelle jetzt die **lauteste** Lautstärke ein, die Home Assistant nutzen soll. Sie wird 100 % im Regler.\n\nAktuelle Lautstärke am Receiver: **{current}**\n\nDanach bei Bedarf wieder leiser drehen und auf Absenden klicken."
+      },
+      "volume_limits": {
+        "title": "Lautstärke-Assistent (3/3): Grenzen",
+        "description": "Regelbereich: **{quiet}** (0 %) bis **{loud}** (100 %).\n\nDie maximale Lautstärke ist eine harte Grenze für Regler und Lauter-Taste. Vorausgewählt ist deine lauteste Stufe.",
+        "data": {
+          "max_volume_raw": "Maximale Lautstärke",
+          "volume_step_db": "Schrittweite für Lauter/Leiser"
+        },
+        "data_description": {
+          "max_volume_raw": "Home Assistant dreht nie lauter als diesen Wert.",
+          "volume_step_db": "So weit verstellt ein Druck auf Lauter oder Leiser den Receiver."
+        }
       }
     },
     "error": {
@@ -66,6 +88,98 @@
     },
     "command_failed": {
       "message": "Der Receiver hat den Befehl nicht ausgeführt: {error}"
+    }
+  },
+  "selector": {
+    "max_volume": {
+      "options": {
+        "none": "Keine Begrenzung",
+        "0": "0 dB",
+        "-1": "-1 dB",
+        "-2": "-2 dB",
+        "-3": "-3 dB",
+        "-4": "-4 dB",
+        "-5": "-5 dB",
+        "-6": "-6 dB",
+        "-7": "-7 dB",
+        "-8": "-8 dB",
+        "-9": "-9 dB",
+        "-10": "-10 dB",
+        "-11": "-11 dB",
+        "-12": "-12 dB",
+        "-13": "-13 dB",
+        "-14": "-14 dB",
+        "-15": "-15 dB",
+        "-16": "-16 dB",
+        "-17": "-17 dB",
+        "-18": "-18 dB",
+        "-19": "-19 dB",
+        "-20": "-20 dB",
+        "-21": "-21 dB",
+        "-22": "-22 dB",
+        "-23": "-23 dB",
+        "-24": "-24 dB",
+        "-25": "-25 dB",
+        "-26": "-26 dB",
+        "-27": "-27 dB",
+        "-28": "-28 dB",
+        "-29": "-29 dB",
+        "-30": "-30 dB",
+        "-31": "-31 dB",
+        "-32": "-32 dB",
+        "-33": "-33 dB",
+        "-34": "-34 dB",
+        "-35": "-35 dB",
+        "-36": "-36 dB",
+        "-37": "-37 dB",
+        "-38": "-38 dB",
+        "-39": "-39 dB",
+        "-40": "-40 dB",
+        "-41": "-41 dB",
+        "-42": "-42 dB",
+        "-43": "-43 dB",
+        "-44": "-44 dB",
+        "-45": "-45 dB",
+        "-46": "-46 dB",
+        "-47": "-47 dB",
+        "-48": "-48 dB",
+        "-49": "-49 dB",
+        "-50": "-50 dB",
+        "-51": "-51 dB",
+        "-52": "-52 dB",
+        "-53": "-53 dB",
+        "-54": "-54 dB",
+        "-55": "-55 dB",
+        "-56": "-56 dB",
+        "-57": "-57 dB",
+        "-58": "-58 dB",
+        "-59": "-59 dB",
+        "-60": "-60 dB"
+      }
+    },
+    "pause_minutes": {
+      "options": {
+        "5": "5 Minuten",
+        "10": "10 Minuten",
+        "15": "15 Minuten",
+        "30": "30 Minuten",
+        "60": "60 Minuten"
+      }
+    },
+    "volume_step_db": {
+      "options": {
+        "1": "1 dB",
+        "2": "2 dB",
+        "3": "3 dB",
+        "5": "5 dB"
+      }
+    }
+  },
+  "entity": {
+    "switch": {
+      "control_connection": {
+        "name": "Steuerverbindung"
+      }
     }
   }
 }

@@ -67,9 +67,17 @@ class PioneerAVRClient:
         *,
         volume_min_raw: int = VOLUME_MIN,
         volume_max_raw: int = VOLUME_MAX,
+        max_volume_raw: int | None = None,
+        volume_step_db: int = 1,
     ) -> None:
         if not VOLUME_MIN <= volume_min_raw < volume_max_raw <= VOLUME_MAX:
             raise ValueError("invalid calibrated volume range")
+        if max_volume_raw is not None and not VOLUME_MIN < max_volume_raw <= VOLUME_MAX:
+            raise ValueError("invalid maximum volume")
+        if volume_step_db < 1:
+            raise ValueError("invalid volume step")
+        self._max_volume_raw = max_volume_raw
+        self._volume_step_db = volume_step_db
         self._transport = PioneerTCPTransport(host, port, timeout)
         self._transport.add_listener(self._handle_response)
         self._state = ReceiverState()
@@ -203,13 +211,33 @@ class PioneerAVRClient:
             f"receiver did not confirm power on after {self.POWER_ON_ATTEMPTS} attempts"
         )
 
+    @property
+    def max_volume_raw(self) -> int | None:
+        """Return the configured maximum raw volume, if any."""
+        return self._max_volume_raw
+
     async def volume_up(self) -> None:
-        """Send one main-zone volume-up command without retrying it."""
-        await self._send("VU")
+        """Raise the volume by the configured step size (1 dB per VU).
+
+        With a maximum volume configured, the current volume is read first and
+        only as many steps are sent as fit below the limit.
+        """
+        steps = self._volume_step_db
+        if self._max_volume_raw is not None:
+            current = await self._query_volume()
+            steps = min(
+                steps, max(0, (self._max_volume_raw - current) // self.VOLUME_STEP_RAW)
+            )
+            if steps == 0:
+                _LOGGER.debug("Volume up skipped: maximum volume reached")
+                return
+        for _ in range(steps):
+            await self._send("VU")
 
     async def volume_down(self) -> None:
-        """Send one main-zone volume-down command without retrying it."""
-        await self._send("VD")
+        """Lower the volume by the configured step size (1 dB per VD)."""
+        for _ in range(self._volume_step_db):
+            await self._send("VD")
 
     async def set_volume(self, level: float) -> None:
         """Move to a calibrated volume level with confirmed 1 dB steps.
@@ -232,7 +260,12 @@ class PioneerAVRClient:
                     )
                 target = self._target_raw(self._volume_target)
                 target = min(target, ceiling)
-                steps = round((target - current) / self.VOLUME_STEP_RAW)
+                if self._max_volume_raw is not None:
+                    target = min(target, self._max_volume_raw)
+                # Round towards the current level so a step never overshoots
+                # the target (and therefore never the maximum volume).
+                delta = abs(target - current) // self.VOLUME_STEP_RAW
+                steps = delta if target > current else -delta
                 if steps == 0:
                     return
                 command = "VU" if steps > 0 else "VD"

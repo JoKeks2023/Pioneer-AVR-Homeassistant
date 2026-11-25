@@ -8,6 +8,11 @@ from urllib.parse import urlsplit
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PORT
+from homeassistant.helpers.selector import (
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
 if TYPE_CHECKING:
     from homeassistant.helpers.service_info.ssdp import SsdpServiceInfo
@@ -20,14 +25,24 @@ from .client import (
 )
 from .const import (
     CONF_ASSUME_OFF_WHEN_UNAVAILABLE,
-    CONF_CALIBRATE_VOLUME,
+    CONF_MAX_VOLUME_RAW,
+    CONF_PAUSE_MINUTES,
     CONF_VOLUME_MAX_RAW,
     CONF_VOLUME_MIN_RAW,
+    CONF_VOLUME_STEP_DB,
     DEFAULT_ASSUME_OFF_WHEN_UNAVAILABLE,
     DEFAULT_NAME,
+    DEFAULT_PAUSE_MINUTES,
     DEFAULT_PORT,
     DEFAULT_TIMEOUT,
+    DEFAULT_VOLUME_STEP_DB,
     DOMAIN,
+    MAX_VOLUME_DB_CHOICES,
+    MAX_VOLUME_NONE,
+    PAUSE_MINUTES_CHOICES,
+    VOLUME_STEP_DB_CHOICES,
+    db_to_raw,
+    raw_to_db,
 )
 
 
@@ -120,13 +135,9 @@ class PioneerAVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except (TypeError, ValueError):
             port = DEFAULT_PORT
 
-        unique_id = discovery_info.ssdp_udn or discovery_info.ssdp_usn.split(
-            "::", 1
-        )[0]
+        unique_id = discovery_info.ssdp_udn or discovery_info.ssdp_usn.split("::", 1)[0]
         await self.async_set_unique_id(unique_id)
-        self._abort_if_unique_id_configured(
-            updates={CONF_HOST: host, CONF_PORT: port}
-        )
+        self._abort_if_unique_id_configured(updates={CONF_HOST: host, CONF_PORT: port})
         if self._endpoint_configured(host, port):
             return self.async_abort(reason="already_configured")
 
@@ -145,9 +156,7 @@ class PioneerAVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
-                await _async_validate(
-                    self._discovered_host, self._discovered_port
-                )
+                await _async_validate(self._discovered_host, self._discovered_port)
             except PioneerAVRConnectionError:
                 errors["base"] = "cannot_connect"
             except PioneerAVRProtocolError:
@@ -224,100 +233,172 @@ class PioneerAVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
+def _dropdown(options: list[str], translation_key: str) -> SelectSelector:
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=options,
+            mode=SelectSelectorMode.DROPDOWN,
+            translation_key=translation_key,
+        )
+    )
+
+
+def _format_db(raw: int | None) -> str:
+    if raw is None:
+        return "?"
+    return f"{raw_to_db(raw):g} dB"
+
+
 class PioneerAVROptionsFlow(config_entries.OptionsFlow):
-    """Configure offline behavior and volume-display endpoints."""
+    """Options menu: general settings and the volume wizard."""
 
     def __init__(self) -> None:
-        self._pending_options: dict[str, Any] = {}
-        self._calibration_min_raw: int | None = None
+        self._quiet_raw: int | None = None
+        self._loud_raw: int | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Configure receiver behavior or calibrate the volume display."""
-        if user_input is not None:
-            self._pending_options = dict(self.config_entry.options)
-            self._pending_options[CONF_ASSUME_OFF_WHEN_UNAVAILABLE] = user_input[
-                CONF_ASSUME_OFF_WHEN_UNAVAILABLE
-            ]
-            if user_input[CONF_CALIBRATE_VOLUME]:
-                return await self.async_step_calibration_min()
-            return self.async_create_entry(title="", data=self._pending_options)
+        """Show the options menu."""
+        return self.async_show_menu(
+            step_id="init", menu_options=["general", "volume_quiet"]
+        )
 
+    async def async_step_general(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Offline behaviour and connection pause length."""
+        options = self.config_entry.options
+        if user_input is not None:
+            return self.async_create_entry(
+                data={
+                    **options,
+                    CONF_ASSUME_OFF_WHEN_UNAVAILABLE: user_input[
+                        CONF_ASSUME_OFF_WHEN_UNAVAILABLE
+                    ],
+                    CONF_PAUSE_MINUTES: int(user_input[CONF_PAUSE_MINUTES]),
+                }
+            )
         return self.async_show_form(
-            step_id="init",
+            step_id="general",
             data_schema=vol.Schema(
                 {
                     vol.Required(
                         CONF_ASSUME_OFF_WHEN_UNAVAILABLE,
-                        default=self.config_entry.options.get(
+                        default=options.get(
                             CONF_ASSUME_OFF_WHEN_UNAVAILABLE,
                             DEFAULT_ASSUME_OFF_WHEN_UNAVAILABLE,
                         ),
                     ): bool,
-                    vol.Required(CONF_CALIBRATE_VOLUME, default=False): bool,
+                    vol.Required(
+                        CONF_PAUSE_MINUTES,
+                        default=str(
+                            options.get(CONF_PAUSE_MINUTES, DEFAULT_PAUSE_MINUTES)
+                        ),
+                    ): _dropdown(
+                        [str(m) for m in PAUSE_MINUTES_CHOICES], "pause_minutes"
+                    ),
                 }
             ),
         )
 
-    async def async_step_calibration_min(
+    async def async_step_volume_quiet(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Capture the quiet endpoint selected on the receiver."""
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            state, error = await self._async_read_calibration_state()
-            if error is not None:
-                errors["base"] = error
-            elif state.volume_raw is None:
-                errors["base"] = "volume_not_reported"
-            else:
-                self._calibration_min_raw = state.volume_raw
-                return await self.async_step_calibration_max()
-        return self.async_show_form(
-            step_id="calibration_min",
-            data_schema=vol.Schema({}),
-            errors=errors,
-        )
+        """Wizard 1/3: capture the quietest level as slider 0 %."""
+        return await self._async_capture_step("volume_quiet", user_input)
 
-    async def async_step_calibration_max(
+    async def async_step_volume_loud(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Capture the loud endpoint selected on the receiver."""
-        assert self._calibration_min_raw is not None
+        """Wizard 2/3: capture the loudest wanted level as slider 100 %."""
+        return await self._async_capture_step("volume_loud", user_input)
+
+    async def _async_capture_step(
+        self, step_id: str, user_input: dict[str, Any] | None
+    ) -> config_entries.ConfigFlowResult:
         errors: dict[str, str] = {}
+        state, error = await self._async_read_state()
         if user_input is not None:
-            state, error = await self._async_read_calibration_state()
             if error is not None:
                 errors["base"] = error
             elif state.volume_raw is None:
                 errors["base"] = "volume_not_reported"
-            elif state.volume_raw <= self._calibration_min_raw:
+            elif step_id == "volume_quiet":
+                self._quiet_raw = state.volume_raw
+                return await self.async_step_volume_loud()
+            elif state.volume_raw <= (self._quiet_raw or 0):
                 errors["base"] = "invalid_volume_range"
             else:
-                self._pending_options[CONF_VOLUME_MIN_RAW] = (
-                    self._calibration_min_raw
-                )
-                self._pending_options[CONF_VOLUME_MAX_RAW] = state.volume_raw
-                return self.async_create_entry(
-                    title="", data=self._pending_options
-                )
+                self._loud_raw = state.volume_raw
+                return await self.async_step_volume_limits()
         return self.async_show_form(
-            step_id="calibration_max",
+            step_id=step_id,
             data_schema=vol.Schema({}),
             errors=errors,
             description_placeholders={
-                "minimum": str(self._calibration_min_raw)
+                "current": _format_db(state.volume_raw if state else None),
+                "quiet": _format_db(self._quiet_raw),
             },
         )
 
-    async def _async_read_calibration_state(
+    async def async_step_volume_limits(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Wizard 3/3: maximum volume and step size."""
+        assert self._quiet_raw is not None and self._loud_raw is not None
+        options = self.config_entry.options
+        if user_input is not None:
+            max_volume = user_input[CONF_MAX_VOLUME_RAW]
+            return self.async_create_entry(
+                data={
+                    **options,
+                    CONF_VOLUME_MIN_RAW: self._quiet_raw,
+                    CONF_VOLUME_MAX_RAW: self._loud_raw,
+                    CONF_MAX_VOLUME_RAW: (
+                        None
+                        if max_volume == MAX_VOLUME_NONE
+                        else db_to_raw(int(max_volume))
+                    ),
+                    CONF_VOLUME_STEP_DB: int(user_input[CONF_VOLUME_STEP_DB]),
+                }
+            )
+        loud_db = int(raw_to_db(self._loud_raw))
+        max_options = [str(db) for db in reversed(MAX_VOLUME_DB_CHOICES)]
+        return self.async_show_form(
+            step_id="volume_limits",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_MAX_VOLUME_RAW,
+                        default=str(loud_db)
+                        if str(loud_db) in max_options
+                        else MAX_VOLUME_NONE,
+                    ): _dropdown([MAX_VOLUME_NONE, *max_options], "max_volume"),
+                    vol.Required(
+                        CONF_VOLUME_STEP_DB,
+                        default=str(
+                            options.get(CONF_VOLUME_STEP_DB, DEFAULT_VOLUME_STEP_DB)
+                        ),
+                    ): _dropdown(
+                        [str(step) for step in VOLUME_STEP_DB_CHOICES], "volume_step_db"
+                    ),
+                }
+            ),
+            description_placeholders={
+                "quiet": _format_db(self._quiet_raw),
+                "loud": _format_db(self._loud_raw),
+            },
+        )
+
+    async def _async_read_state(
         self,
     ) -> tuple[ReceiverState | None, str | None]:
-        """Read the current receiver state for a calibration step."""
+        """Read the current receiver state, preferring the running client."""
         try:
             runtime = getattr(self.config_entry, "runtime_data", None)
             if runtime is not None:
+                await runtime.coordinator.async_resume()
                 state = await runtime.client.query_state()
             else:
                 state = await _async_query_state(
