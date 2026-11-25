@@ -69,6 +69,12 @@ class PioneerTCPTransport:
             self._reader, self._writer = await asyncio.wait_for(
                 asyncio.open_connection(self.host, self.port), self.timeout
             )
+        except ConnectionRefusedError as err:
+            raise TransportError(
+                f"{self.host}:{self.port} refused the connection; the receiver "
+                "accepts only one control connection, so another client (e.g. "
+                "Pioneer ControlApp) may be connected"
+            ) from err
         except (OSError, TimeoutError) as err:
             raise TransportError(f"cannot connect to {self.host}:{self.port}") from err
         _enable_keepalive(self._writer.get_extra_info("socket"))

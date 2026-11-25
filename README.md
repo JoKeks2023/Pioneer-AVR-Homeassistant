@@ -50,8 +50,8 @@ automatic SSDP discovery, a UI config flow, immediate TCP state updates, and a
 | --- | :---: | --- |
 | Power on and off | ✅ | Powered-off receivers can remain represented as `off` |
 | Volume display | ✅ | Normalized to Home Assistant's `0.0–1.0` range |
-| Volume up and down | ✅ | Native `VU` / `VD` commands |
-| Exact volume / volume slider | — | Not exposed: this receiver ignores direct target commands and its step reports are not linear |
+| Volume up and down | ✅ | Native `VU` / `VD` commands, 1 dB per step |
+| Volume slider / exact volume | ✅ | Reached with confirmed 1 dB steps; at most +10 dB per change |
 | Mute and unmute | ✅ | State is queried and confirmed |
 | Current input | ✅ | Receiver-reported source |
 | Input selection | ✅ | Confirmed Pioneer source codes |
@@ -108,8 +108,9 @@ restart Home Assistant.
 3. Enable **Network Standby** if network power-on is required. Some receivers
    still disable their network interface when off; the integration can retain
    a correct `off` state in that case.
-4. Close Pioneer ControlApp during setup; the receiver supports only a small
-   number of simultaneous control connections.
+4. Close Pioneer ControlApp. The VSX-827 accepts **only one** control
+   connection on port `8102`; while Home Assistant is connected, ControlApp
+   and other tools are refused, and vice versa.
 5. In Home Assistant, open **Settings → Devices & services**. Accept the
    discovered receiver, or select **Add integration** and search for
    **Pioneer AVR**.
@@ -152,9 +153,8 @@ part of the receiver's range that is actually useful for your room:
 4. The integration reloads and maps the captured endpoints to `0 %` and `100 %`.
 
 The assistant only sends state queries during calibration. It never changes
-the volume itself. Calibration changes only the displayed percentage; it does
-not add exact target-volume control. Use Home Assistant's volume-up and
-volume-down actions for control.
+the volume itself. Calibration defines which receiver levels the volume slider's
+`0 %` and `100 %` correspond to.
 
 ## How it works
 
@@ -168,12 +168,21 @@ incoming state update cannot be mistaken for the reply to another command.
 Connection loss, timeouts, malformed responses, and reconnects are handled by
 the integration's built-in asynchronous client.
 
-The tested VSX-827 ignores the documented direct `nnnVL` exact-volume command.
-Hardware testing also showed that one `VU` or `VD` command does not always
-change the reported raw value by exactly one. The integration therefore does
-not advertise Home Assistant's `VOLUME_SET` feature and never simulates a
-target value with a sequence of steps. Volume up and down each send exactly one
-native command.
+The VSX-827 accepts a single control connection. Home Assistant keeps it open
+for immediate updates, enables TCP keepalive, and drops and reopens the
+connection as soon as the receiver stops answering, so a stale connection does
+not block the receiver.
+
+The tested VSX-827 ignores the documented direct `nnnVL` exact-volume command,
+also after a wake CR. One `VU` or `VD` moves the raw value by exactly two
+half-steps (1 dB), and steps sent 100 ms apart are all applied. The volume
+slider therefore computes the number of 1 dB steps, sends them, re-reads the
+actual volume, and corrects from the measured value (never by blindly repeating
+a step). A single change raises the volume by at most 10 dB. Volume up and down
+each send exactly one native command.
+
+Power-on sends a bare CR to wake the receiver, then `PO`, and confirms the
+result with `?PWR` (up to three attempts).
 
 Listening-mode selection mirrors the three buttons in Pioneer ControlApp:
 
@@ -215,10 +224,10 @@ all receiver controls work normally.
 | **Invalid handler specified** | Install version `0.1.1` or newer through HACS and restart Home Assistant completely |
 | Receiver is not discovered across routed networks | Expected unless SSDP multicast is relayed; use manual IP configuration |
 | Connection fails while off | Enable Network Standby for power-on, or enable the preserved `off` option |
-| Port `8102` refuses connections | Close Pioneer ControlApp and other tools using the receiver connection |
+| Port `8102` refuses connections | The receiver accepts only one connection: close Pioneer ControlApp, or disable the integration while using other tools |
 | Power-on fails but other controls work while on | Network Standby is disabled or the network interface sleeps |
 | Home Assistant volume percentage feels wrong | Calibrate the displayed range under **Configure**; this affects display only |
-| A `media_player.volume_set` automation fails | Exact target volume is intentionally unsupported; use `media_player.volume_up` or `media_player.volume_down` |
+| Volume slider stops short of a high target | Intended: one change raises the volume by at most 10 dB; move it again |
 | Sound-mode field has no active value | Expected: the VSX-827 does not report the current mode over TCP |
 | An input is shown but cannot be selected | AirPlay and DMR are reportable but not selectable through `FN` |
 
@@ -274,7 +283,7 @@ hardware testing.
 | Power on/off | `PO` / `PF` | `PWR0` / `PWR1` or `PWR2` | Implemented |
 | Power query | `?PWR` | `PWRn` | Implemented |
 | Volume up/down | `VU` / `VD` | `VOLnnn` | Implemented |
-| Exact volume | `nnnVL` / repeated `VU`/`VD` | Ignored / non-linear reports | Not exposed |
+| Exact volume | `nnnVL` | Ignored (generic `R`) | Emulated with confirmed `VU`/`VD` steps |
 | Volume query | `?VOL` | `VOLnnn` | Implemented |
 | Mute on/off | `MO` / `MF` | `MUT0` / `MUT1` | Implemented |
 | Mute query | `?MUT` | `MUTn` | Implemented |
@@ -310,7 +319,9 @@ Sources:
 Live VSX-827 validation confirmed TCP port `8102`, long-form power, volume,
 mute and input queries, mute control, and input selection. It also confirmed
 that direct two- and three-digit exact-volume commands are ignored by the
-tested receiver firmware.
+tested receiver firmware. A probe on 2026-11-25 showed that each `VU`/`VD`
+changes the raw volume by exactly 2 (1 dB) and that the receiver refuses a
+second simultaneous TCP connection.
 
 </details>
 
@@ -333,7 +344,8 @@ acceptance still requires guarded validation against a real VSX-827.
 - TCP/IP only; no serial configuration or adapter.
 - No independent Speaker B / Zone 2 entity.
 - No media playback controls.
-- No exact target-volume action or volume slider; use volume up/down.
+- Volume changes in 1 dB steps; the slider raises by at most 10 dB per change.
+- Only one control connection at a time (receiver limitation).
 - No cloud service or remote-access relay.
 - Listening-mode selection without current-mode feedback.
 - Network power-on is impossible when the receiver disables its network

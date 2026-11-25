@@ -50,6 +50,13 @@ class PioneerAVRClient:
     )
     ACTION_ATTEMPTS = 4
     POWER_ON_ATTEMPTS = 3
+    # Hardware probe 2026-11-25: one VU/VD moves the VSX-827 by exactly two raw
+    # half-steps (1 dB). Steps sent 100 ms apart (see _send) are all applied.
+    VOLUME_STEP_RAW = 2
+    VOLUME_SETTLE = 0.6
+    VOLUME_SET_ROUNDS = 3
+    # Never raise the volume by more than 10 dB in one set_volume call.
+    VOLUME_MAX_RAISE_STEPS = 10
     POWER_ON_SETTLE = 1.5
 
     def __init__(
@@ -69,6 +76,8 @@ class PioneerAVRClient:
         self._listeners: list[Callable[[ReceiverState], None]] = []
         self._volume_min_raw = volume_min_raw
         self._volume_max_raw = volume_max_raw
+        self._volume_lock = asyncio.Lock()
+        self._volume_target: float | None = None
 
     @property
     def connected(self) -> bool:
@@ -87,8 +96,8 @@ class PioneerAVRClient:
 
     @property
     def volume_control_mode(self) -> str:
-        """Return the verified volume control mode."""
-        return "step_only"
+        """Return how exact volume is implemented."""
+        return "confirmed_steps"
 
     @property
     def volume_range_raw(self) -> tuple[int, int]:
@@ -201,6 +210,55 @@ class PioneerAVRClient:
     async def volume_down(self) -> None:
         """Send one main-zone volume-down command without retrying it."""
         await self._send("VD")
+
+    async def set_volume(self, level: float) -> None:
+        """Move to a calibrated volume level with confirmed 1 dB steps.
+
+        The VSX-827 ignores ``nnnVL``, so the target is reached with VU/VD.
+        Each round re-reads the actual volume before stepping, so a step is
+        never blindly repeated. While a move is running, a newer target
+        replaces the old one instead of queueing another move.
+        """
+        self._volume_target = min(1.0, max(0.0, level))
+        if self._volume_lock.locked():
+            return
+        async with self._volume_lock:
+            ceiling: int | None = None
+            for _ in range(self.VOLUME_SET_ROUNDS):
+                current = await self._query_volume()
+                if ceiling is None:
+                    ceiling = (
+                        current + self.VOLUME_MAX_RAISE_STEPS * self.VOLUME_STEP_RAW
+                    )
+                target = self._target_raw(self._volume_target)
+                target = min(target, ceiling)
+                steps = round((target - current) / self.VOLUME_STEP_RAW)
+                if steps == 0:
+                    return
+                command = "VU" if steps > 0 else "VD"
+                for _ in range(abs(steps)):
+                    await self._send(command)
+                await asyncio.sleep(self.VOLUME_SETTLE)
+            _LOGGER.debug(
+                "Volume target not reached after %d rounds", self.VOLUME_SET_ROUNDS
+            )
+
+    def _target_raw(self, level: float) -> int:
+        span = self._volume_max_raw - self._volume_min_raw
+        return round(self._volume_min_raw + level * span)
+
+    async def _query_volume(self) -> int:
+        await self.connect()
+        try:
+            response = await self._transport.request("?VOL", "VOL")
+        except TransportError as err:
+            raise PioneerAVRConnectionError(str(err)) from err
+        self._handle_response(response)
+        if self._state.power is False:
+            raise PioneerAVRProtocolError("receiver is off")
+        if self._state.volume_raw is None:
+            raise PioneerAVRProtocolError("receiver did not report its volume")
+        return self._state.volume_raw
 
     async def set_mute(self, muted: bool) -> None:
         """Set main-zone mute."""

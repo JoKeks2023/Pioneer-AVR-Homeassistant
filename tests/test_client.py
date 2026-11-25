@@ -81,7 +81,7 @@ async def test_query_and_commands_with_fragmented_unsolicited_responses() -> Non
         assert received.count("VD") == 1
         assert "MO" in received
         assert "05FN" in received
-        assert client.volume_control_mode == "step_only"
+        assert client.volume_control_mode == "confirmed_steps"
     finally:
         await client.disconnect()
         server.close()
@@ -129,7 +129,7 @@ def test_calibrated_volume_range_only_normalizes_display() -> None:
 
     client._handle_response("VOL080")  # noqa: SLF001
     assert client.volume_level == 1.0
-    assert client.volume_control_mode == "step_only"
+    assert client.volume_control_mode == "confirmed_steps"
 
 
 def test_rejects_invalid_calibrated_volume_range() -> None:

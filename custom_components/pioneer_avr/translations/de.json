@@ -37,7 +37,7 @@
     "step": {
       "init": {
         "title": "Pioneer-AVR-Optionen",
-        "description": "Lege fest, wie ein ausgeschalteter und nicht erreichbarer Receiver angezeigt wird, oder kalibriere die angezeigte Lautstärke. Die Kalibrierung ermöglicht keine exakte Ziel-Lautstärke.",
+        "description": "Lege fest, wie ein ausgeschalteter und nicht erreichbarer Receiver angezeigt wird, oder kalibriere die angezeigte Lautstärke.",
         "data": {
           "assume_off_when_unavailable": "Bei Nichterreichbarkeit nach dem Ausschalten als aus anzeigen",
           "calibrate_volume": "Angezeigten Lautstärkebereich kalibrieren"
